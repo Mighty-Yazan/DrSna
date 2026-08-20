@@ -6,9 +6,9 @@ plugins {
     kotlin("plugin.jpa") version "2.3.21"
 }
 
-group = "com.example"
+group = "com.drsna"
 version = "0.0.1-SNAPSHOT"
-description = "demo"
+description = "DrSna"
 
 java {
     toolchain {
@@ -31,13 +31,11 @@ dependencies {
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
-    // Spring Security
+    // Spring Security + Native OAuth2 Resource Server
     implementation("org.springframework.boot:spring-boot-starter-security")
+    implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
 
-    // JWT Generation & Validation (JJWT)
-    implementation("io.jsonwebtoken:jjwt-api:0.12.5")
-    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.5")
-    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.5")
+    implementation("org.springframework.boot:spring-boot-starter-validation")
 }
 
 kotlin {
