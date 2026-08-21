@@ -1,0 +1,10 @@
+.git
+.gitignore
+.gradle
+.idea
+.kotlin
+build
+*.iml
+*.iws
+*.ipr
+out
