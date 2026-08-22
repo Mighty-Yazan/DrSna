@@ -18,6 +18,9 @@ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter
 import org.springframework.security.web.SecurityFilterChain
 import javax.crypto.spec.SecretKeySpec
+import org.springframework.web.cors.CorsConfiguration
+import org.springframework.web.cors.CorsConfigurationSource
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 
 @Configuration
 @EnableWebSecurity
@@ -31,7 +34,10 @@ class SecurityConfig(
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
             .csrf { it.disable() }
-            .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+            .cors { }
+            .sessionManagement {
+                it.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            }
             .authorizeHttpRequests { auth ->
                 auth
                     .requestMatchers(
@@ -44,11 +50,42 @@ class SecurityConfig(
             }
             .oauth2ResourceServer { oauth2 ->
                 oauth2.jwt { jwt ->
-                    jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())
+                    jwt.jwtAuthenticationConverter(
+                        jwtAuthenticationConverter()
+                    )
                 }
             }
 
         return http.build()
+    }
+
+    @Bean
+    fun corsConfigurationSource(): CorsConfigurationSource {
+        val configuration = CorsConfiguration()
+
+        configuration.allowedOrigins = listOf(
+            "http://localhost:5173"
+        )
+
+        configuration.allowedMethods = listOf(
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS"
+        )
+
+        configuration.allowedHeaders = listOf("*")
+
+        val source = UrlBasedCorsConfigurationSource()
+
+        source.registerCorsConfiguration(
+            "/**",
+            configuration
+        )
+
+        return source
     }
 
     @Bean
