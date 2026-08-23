@@ -9,7 +9,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
-
+import org.springframework.security.access.AccessDeniedException
 @RestControllerAdvice
 class GlobalExceptionHandler {
 
@@ -74,5 +74,16 @@ class GlobalExceptionHandler {
             path = request.requestURI
         )
         return ResponseEntity.status(status).body(response)
+    }
+    @ExceptionHandler(AccessDeniedException::class)
+    fun handleAccessDeniedException(ex: AccessDeniedException): ResponseEntity<Map<String, Any?>> {
+        val errorResponse = mapOf(
+            "timestamp" to java.time.Instant.now(),
+            "status" to HttpStatus.FORBIDDEN.value(),
+            "error" to "Forbidden",
+            "message" to "Access Denied: You do not have permission to access this resource",
+            "validationErrors" to null
+        )
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(errorResponse)
     }
 }

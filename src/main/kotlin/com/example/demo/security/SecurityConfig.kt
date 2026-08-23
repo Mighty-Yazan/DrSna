@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.security.authentication.AuthenticationManager
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
@@ -24,6 +25,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 class SecurityConfig(
     private val tokenBlacklistService: TokenBlacklistService
 ) {
@@ -90,9 +92,13 @@ class SecurityConfig(
 
     @Bean
     fun jwtAuthenticationConverter(): JwtAuthenticationConverter {
-        val converter = JwtAuthenticationConverter()
-        // The default converter is sufficient; blacklist check is handled via a custom decoder wrapper
-        return converter
+        val authoritiesConverter = org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter().apply {
+            setAuthoritiesClaimName("role")
+            setAuthorityPrefix("ROLE_")
+        }
+        return JwtAuthenticationConverter().apply {
+            setJwtGrantedAuthoritiesConverter(authoritiesConverter)
+        }
     }
 
     @Bean
