@@ -5,7 +5,15 @@ import java.time.Instant
 import java.util.UUID
 
 @Entity
-@Table(name = "appointments")
+@Table(
+    name = "appointments",
+    uniqueConstraints = [
+        UniqueConstraint(
+            name = "uk_appointments_doctor_time",
+            columnNames = ["doctor_user_id", "appointment_date"]
+        )
+    ]
+)
 class Appointment(
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -23,6 +31,17 @@ class Appointment(
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "patient_user_id", nullable = false)
     var patient: User? = null,
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "service_id")
+    var service: Services? = null,
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "schedule_id")
+    var schedule: Schedule? = null,
+
+    @Column(name = "appointment_date")
+    var appointmentDate: Instant? = null,
 
     @Column(name = "created_at", nullable = false, updatable = false)
     val createdAt: Instant = Instant.now()
