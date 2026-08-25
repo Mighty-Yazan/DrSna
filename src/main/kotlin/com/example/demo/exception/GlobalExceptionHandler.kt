@@ -59,6 +59,12 @@ class GlobalExceptionHandler {
         return buildResponse(HttpStatus.BAD_REQUEST, "Malformed JSON request", request)
     }
 
+    // Application business rule violations (base class; more specific handlers above take precedence)
+    @ExceptionHandler(AppException::class)
+    fun handleAppException(ex: AppException, request: HttpServletRequest): ResponseEntity<ApiErrorResponse> {
+        return buildResponse(HttpStatus.BAD_REQUEST, ex.message ?: "Bad request", request)
+    }
+
     // 7. Catch-all for unexpected errors
     @ExceptionHandler(Exception::class)
     fun handleAllOtherExceptions(ex: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorResponse> {
