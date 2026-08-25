@@ -1,32 +1,42 @@
 package com.example.demo.model
 
 import jakarta.persistence.*
+import java.time.DayOfWeek
+import java.time.LocalDate
 import java.time.LocalTime
-import java.util.UUID
 
 @Entity
 @Table(name = "schedules")
 class Schedule(
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
-    val id: UUID? = null,
-
-    @Column(name = "clinic_id", nullable = false)
-    val clinicId: UUID,
-
-    @Column(name = "doctor_user_id", nullable = false)
-    val doctorUserId: UUID,
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    val id: Long? = null,
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "day_of_week", nullable = false, length = 20)
-    var dayOfWeek: java.time.DayOfWeek = java.time.DayOfWeek.MONDAY,
+    @Column(name = "type")
+    var type: ScheduleType = ScheduleType.CLINIC_HOURS,
 
-    @Column(name = "start_time", nullable = false)
-    var startTime: LocalTime = LocalTime.MIN,
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "clinic_id")
+    val clinic: Clinic? = null,
 
-    @Column(name = "end_time", nullable = false)
-    var endTime: LocalTime = LocalTime.MIN,
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "doctor_id")
+    val doctor: User? = null,
 
-    @Column(name = "working_hours_doctor", length = 50)
-    var workingHoursDoctor: String? = null
+    @Enumerated(EnumType.STRING)
+    @Column(name = "day_of_week")
+    var dayOfWeek: DayOfWeek? = null,
+
+    @Column(name = "start_time")
+    var startTime: LocalTime? = null,
+
+    @Column(name = "end_time")
+    var endTime: LocalTime? = null,
+
+    @Column(name = "specific_date")
+    var specificDate: LocalDate? = null,
+
+    @Column(name = "reason")
+    var reason: String? = null
 )
