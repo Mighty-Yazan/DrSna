@@ -1,96 +1,147 @@
 package com.example.demo.service
 
-import com.example.demo.dto.ScheduleRequest
-import com.example.demo.dto.ScheduleResponse
-import com.example.demo.exception.AppException
-import com.example.demo.exception.ResourceNotFoundException
-import com.example.demo.model.Role
+import com.example.demo.dto.*
 import com.example.demo.model.Schedule
+import com.example.demo.model.ScheduleType
+import com.example.demo.repository.AppointmentRepository
 import com.example.demo.repository.ClinicDoctorRepository
 import com.example.demo.repository.ClinicRepository
 import com.example.demo.repository.ScheduleRepository
-import com.example.demo.repository.UserRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.DayOfWeek
+import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 import java.util.UUID
 
 @Service
 class ScheduleAdminService(
+    private val scheduleRepository: ScheduleRepository,
     private val clinicRepository: ClinicRepository,
-    private val userRepository: UserRepository,
     private val clinicDoctorRepository: ClinicDoctorRepository,
-    private val scheduleRepository: ScheduleRepository
+    private val appointmentRepository: AppointmentRepository
 ) {
-    @Transactional(readOnly = true)
-    fun list(userEmail: String): List<ScheduleResponse> {
-        val clinic = clinicRepository.findByUserEmail(userEmail)
-            .orElseThrow { ResourceNotFoundException("Clinic profile not found") }
+    private val zoneId = ZoneId.of("Asia/Amman")
 
-        return scheduleRepository.findAllByClinicIdOrderByDoctorUserIdAscDayOfWeekAscStartTimeAsc(clinic.id!!)
-            .map { it.toResponse() }
+    @Transactional
+    fun saveClinicHours(clinicId: UUID, request: SaveClinicHoursRequest): ScheduleResponseDto {
+        val clinic = clinicRepository.findById(clinicId)
+            .orElseThrow { RuntimeException("العيادة غير موجودة") }
+
+        val schedule = scheduleRepository.findByClinicIdAndTypeAndDayOfWeek(
+            clinicId, ScheduleType.CLINIC_HOURS, request.dayOfWeek
+        ) ?: Schedule(type = ScheduleType.CLINIC_HOURS, clinic = clinic)
+
+        schedule.dayOfWeek = request.dayOfWeek
+        schedule.startTime = request.startTime
+        schedule.endTime = request.endTime
+
+        return scheduleRepository.save(schedule).toResponseDto()
     }
 
     @Transactional
-    fun create(userEmail: String, request: ScheduleRequest): ScheduleResponse {
-        val clinic = clinicRepository.findByUserEmail(userEmail)
-            .orElseThrow { ResourceNotFoundException("Clinic profile not found") }
+    fun saveDoctorSchedule(clinicId: UUID, request: SaveDoctorScheduleRequest): ScheduleResponseDto {
+        val clinic = clinicRepository.findById(clinicId)
+            .orElseThrow { RuntimeException("العيادة غير موجودة") }
 
-        val doctorId = request.doctorUserId
-        val day = DayOfWeek.valueOf(request.dayOfWeek.uppercase())
-        val start = LocalTime.parse(request.startTime)
-        val end = LocalTime.parse(request.endTime)
+        val doctor = clinicDoctorRepository.findAll()
+            .firstOrNull { it.doctor?.id.toString() == request.doctorId || it.id.toString() == request.doctorId }
+            ?.doctor
+            ?: throw RuntimeException("الطبيب غير موجود")
 
-        if (!start.isBefore(end)) {
-            throw AppException("Start time must be before end time")
+        val schedule = scheduleRepository.findByClinicId(clinicId)
+            .firstOrNull { it.doctor?.id == doctor.id && it.type == ScheduleType.DOCTOR_SHIFT && it.dayOfWeek == request.dayOfWeek }
+            ?: Schedule(type = ScheduleType.DOCTOR_SHIFT, clinic = clinic, doctor = doctor)
+
+        schedule.dayOfWeek = request.dayOfWeek
+        schedule.startTime = request.startTime
+        schedule.endTime = request.endTime
+
+        return scheduleRepository.save(schedule).toResponseDto()
+    }
+
+    @Transactional
+    fun saveHoliday(clinicId: UUID, request: SaveHolidayRequest): ScheduleResponseDto {
+        val clinic = clinicRepository.findById(clinicId)
+            .orElseThrow { RuntimeException("العيادة غير موجودة") }
+
+        val doctor = request.doctorId?.let { docId ->
+            clinicDoctorRepository.findAll().firstOrNull { it.doctor?.id.toString() == docId }?.doctor
+                ?: throw RuntimeException("الطبيب غير موجود")
         }
 
-        if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinic.user!!.id!!, doctorId)) {
-            throw AppException("Doctor is not associated with this clinic")
-        }
-
-        val doctor = userRepository.findById(doctorId)
-            .orElseThrow { ResourceNotFoundException("Doctor not found") }
-
-        if (doctor.role != Role.DOCTOR) {
-            throw AppException("Selected user is not a doctor")
-        }
-
-        val savedSchedule = scheduleRepository.save(
-            Schedule(
-                clinicId = clinic.id!!,
-                doctorUserId = doctorId,
-                dayOfWeek = day,
-                startTime = start,
-                endTime = end,
-                workingHoursDoctor = request.workingHoursDoctor?.trim()
-            )
+        val schedule = Schedule(
+            type = ScheduleType.HOLIDAY,
+            specificDate = request.specificDate,
+            reason = request.reason,
+            clinic = clinic,
+            doctor = doctor
         )
 
-        return savedSchedule.toResponse()
+        return scheduleRepository.save(schedule).toResponseDto()
     }
 
-    @Transactional
-    fun delete(userEmail: String, scheduleId: UUID) {
-        val clinic = clinicRepository.findByUserEmail(userEmail)
-            .orElseThrow { ResourceNotFoundException("Clinic profile not found") }
+    @Transactional(readOnly = true)
+    fun getAvailableSlots(
+        clinicId: UUID,
+        doctorId: String,
+        date: LocalDate,
+        slotDurationMinutes: Long = 30
+    ): List<LocalTime> {
+        val isClinicHoliday = scheduleRepository.existsByClinicIdAndSpecificDateAndType(clinicId, date, ScheduleType.HOLIDAY)
+        val doctorSchedules = scheduleRepository.findByClinicId(clinicId)
 
-        val schedule = scheduleRepository.findById(scheduleId)
-            .orElseThrow { ResourceNotFoundException("Schedule not found") }
-
-        if (schedule.clinicId != clinic.id) {
-            throw AppException("You do not have permission to delete this schedule")
+        val isDoctorHoliday = doctorSchedules.any {
+            it.doctor?.id.toString() == doctorId && it.type == ScheduleType.HOLIDAY && it.specificDate == date
         }
 
-        scheduleRepository.delete(schedule)
+        if (isClinicHoliday || isDoctorHoliday) {
+            return emptyList()
+        }
+
+        val dayOfWeek = date.dayOfWeek
+
+        val clinicSchedule = scheduleRepository.findByClinicIdAndTypeAndDayOfWeek(clinicId, ScheduleType.CLINIC_HOURS, dayOfWeek)
+            ?: return emptyList()
+
+        val doctorSchedule = doctorSchedules.firstOrNull {
+            it.doctor?.id.toString() == doctorId && it.type == ScheduleType.DOCTOR_SHIFT && it.dayOfWeek == dayOfWeek
+        } ?: return emptyList()
+
+        val startShift = maxOf(clinicSchedule.startTime!!, doctorSchedule.startTime!!)
+        val endShift = minOf(clinicSchedule.endTime!!, doctorSchedule.endTime!!)
+
+        if (startShift >= endShift) return emptyList()
+
+        val doctorUuid = try { UUID.fromString(doctorId) } catch (e: Exception) { return emptyList() }
+        val from = date.atStartOfDay(zoneId).toInstant()
+        val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
+        val bookedInstants = appointmentRepository.findAllByDoctorIdAndAppointmentDateBetween(doctorUuid, from, to)
+            .mapNotNull { it.appointmentDate }
+            .toSet()
+
+        val availableSlots = mutableListOf<LocalTime>()
+        var currentSlot = startShift
+
+        while (currentSlot.plusMinutes(slotDurationMinutes) <= endShift) {
+            val slotInstant = date.atTime(currentSlot).atZone(zoneId).toInstant()
+            if (slotInstant !in bookedInstants) {
+                availableSlots.add(currentSlot)
+            }
+            currentSlot = currentSlot.plusMinutes(slotDurationMinutes)
+        }
+
+        return availableSlots
     }
 
-    private fun Schedule.toResponse() = ScheduleResponse(
-        scheduleId = id!!,
-        dayOfWeek = dayOfWeek,
-        startTime = startTime,
-        endTime = endTime,
-        workingHoursDoctor = workingHoursDoctor
+    private fun Schedule.toResponseDto() = ScheduleResponseDto(
+        id = this.id,
+        type = this.type,
+        dayOfWeek = this.dayOfWeek,
+        startTime = this.startTime,
+        endTime = this.endTime,
+        specificDate = this.specificDate,
+        reason = this.reason,
+        doctorId = this.doctor?.id?.toString()
     )
 }

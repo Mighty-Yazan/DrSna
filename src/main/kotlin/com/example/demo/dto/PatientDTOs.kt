@@ -42,7 +42,7 @@ data class ClinicDetailsResponse(
 )
 
 data class ServiceDetailsResponse(
-    val serviceId: UUID,
+    val serviceId: Any,
     val serviceName: String,
     val description: String?
 )
@@ -55,15 +55,15 @@ data class DoctorDetailsResponse(
 )
 
 data class ScheduleResponse(
-    val scheduleId: UUID,
-    val dayOfWeek: DayOfWeek,
-    val startTime: LocalTime,
-    val endTime: LocalTime,
+    val scheduleId: Any?,
+    val dayOfWeek: DayOfWeek?,
+    val startTime: LocalTime?,
+    val endTime: LocalTime?,
     val workingHoursDoctor: String?
 )
 
 data class AvailabilitySlotResponse(
-    val scheduleId: UUID,
+    val scheduleId: Any?,
     val doctorId: UUID,
     val doctorName: String,
     val date: LocalDate,
@@ -82,10 +82,10 @@ data class CreateAppointmentRequest(
     val doctorId: UUID?,
 
     @field:NotNull(message = "Service ID is required")
-    val serviceId: UUID?,
+    val serviceId: Any?,
 
     @field:NotNull(message = "Schedule ID is required")
-    val scheduleId: UUID?,
+    val scheduleId: Any?,
 
     @field:NotNull(message = "Appointment date is required")
     val appointmentDate: LocalDate?,
@@ -95,14 +95,14 @@ data class CreateAppointmentRequest(
 )
 
 data class AppointmentResponse(
-    val appointmentId: UUID,
+    val appointmentId: Any,
     val patientId: UUID,
     val clinicId: UUID,
     val doctorId: UUID,
     val doctorName: String,
-    val serviceId: UUID,
+    val serviceId: Any,
     val serviceName: String,
-    val scheduleId: UUID,
+    val scheduleId: Any?,
     val appointmentAt: OffsetDateTime,
     val createdAt: OffsetDateTime
 )
