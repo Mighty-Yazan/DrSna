@@ -86,7 +86,7 @@ class ScheduleAdminService(
         clinicId: UUID,
         doctorId: String,
         date: LocalDate,
-        slotDurationMinutes: Long = 30
+        slotDurationMinutes: Long = 60 // تم التعديل: القيمة الافتراضية أصبحت 60 دقيقة
     ): List<LocalTime> {
         val isClinicHoliday = scheduleRepository.existsByClinicIdAndSpecificDateAndType(clinicId, date, ScheduleType.HOLIDAY)
         val doctorSchedules = scheduleRepository.findByClinicId(clinicId)
@@ -123,7 +123,8 @@ class ScheduleAdminService(
         val availableSlots = mutableListOf<LocalTime>()
         var currentSlot = startShift
 
-        while (currentSlot.plusMinutes(slotDurationMinutes) <= endShift) {
+        // تم التعديل: استخدام !isAfter لضمان دقة المقارنة مع كائنات LocalTime
+        while (!currentSlot.plusMinutes(slotDurationMinutes).isAfter(endShift)) {
             val slotInstant = date.atTime(currentSlot).atZone(zoneId).toInstant()
             if (slotInstant !in bookedInstants) {
                 availableSlots.add(currentSlot)

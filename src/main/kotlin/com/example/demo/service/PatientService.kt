@@ -165,8 +165,10 @@ class PatientService(
         val time = request.appointmentTime ?: throw AppException("Appointment time is required")
 
         requireDateNotPast(date)
-        if (time.minute % 30 != 0 || time.second != 0 || time.nano != 0) {
-            throw AppException("Appointments must start on a 30-minute slot")
+
+        // تم التعديل: التحقق من أن الموعد يبدأ على رأس الساعة (الدقيقة 00) ولا يحتوي على ثوانٍ
+        if (time.minute != 0 || time.second != 0 || time.nano != 0) {
+            throw AppException("Appointments must start on a 60-minute slot (top of the hour)")
         }
 
         val patient = userRepository.findByEmail(patientEmail)
@@ -303,19 +305,21 @@ class PatientService(
         }
     }
 
+    // تم التعديل: زيادة الوقت بـ 60 دقيقة في الحلقة التكرارية
     private fun generateSlots(start: LocalTime, end: LocalTime): List<LocalTime> {
         if (!start.isBefore(end)) return emptyList()
         val slots = mutableListOf<LocalTime>()
         var current = start
-        while (!current.plusMinutes(30).isAfter(end)) {
+        while (!current.plusMinutes(60).isAfter(end)) {
             slots += current
-            current = current.plusMinutes(30)
+            current = current.plusMinutes(60)
         }
         return slots
     }
 
+    // تم التعديل: استخدام .isAfter(end) للتأكد من أن مدة الموعد (60 دقيقة) تقع بالكامل ضمن نهاية الشفت
     private fun isValidSlot(start: LocalTime, end: LocalTime, time: LocalTime): Boolean {
-        return !time.isBefore(start) && time.plusMinutes(30) <= end
+        return !time.isBefore(start) && !time.plusMinutes(60).isAfter(end)
     }
 
     private fun requireDateNotPast(date: LocalDate) {
