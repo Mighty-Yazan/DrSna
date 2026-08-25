@@ -1,15 +1,20 @@
 package com.example.demo.service
 
-import com.example.demo.dto.*
+import com.example.demo.dto.AppointmentListResponse
+import com.example.demo.dto.AppointmentSummaryResponse
+import com.example.demo.dto.MessageResponse
 import com.example.demo.exception.AppException
-import com.example.demo.exception.DuplicateResourceException
 import com.example.demo.exception.ResourceNotFoundException
-import com.example.demo.model.*
-import com.example.demo.repository.*
-import org.springframework.dao.DataIntegrityViolationException
+import com.example.demo.model.Appointment
+import com.example.demo.repository.AppointmentRepository
+import com.example.demo.repository.ClinicDoctorRepository
+import com.example.demo.repository.ClinicRepository
+import com.example.demo.repository.UserRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.*
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 
 @Service
@@ -17,109 +22,139 @@ class AppointmentService(
     private val appointmentRepository: AppointmentRepository,
     private val userRepository: UserRepository,
     private val clinicRepository: ClinicRepository,
-    private val scheduleRepository: ScheduleRepository,
     private val clinicDoctorRepository: ClinicDoctorRepository
 ) {
     private val zoneId = ZoneId.of("Asia/Amman")
 
     @Transactional(readOnly = true)
-    fun listAppointments(email: String, status: AppointmentStatus?, doctorId: UUID?): List<AppointmentFilterResponse> {
-        val user = userRepository.findByEmail(email).orElseThrow { ResourceNotFoundException("User not found") }
-        return appointmentRepository.findAll()
-            .asSequence()
-            .filter { appointment ->
-                when (user.role) {
-                    Role.CLINIC -> appointment.clinic?.id == user.id
-                    Role.PATIENT -> appointment.patient?.id == user.id
-                    Role.DOCTOR -> appointment.doctor?.id == user.id
-                    else -> true
-                }
+    fun getMyAppointments(patientEmail: String, scope: String): AppointmentListResponse {
+        val patient = userRepository.findByEmail(patientEmail)
+            .orElseThrow { ResourceNotFoundException("Authenticated patient was not found") }
+
+        val normalizedScope = scope.trim().lowercase().ifEmpty { "upcoming" }
+        if (normalizedScope !in listOf("upcoming", "past", "all")) {
+            throw AppException("Invalid scope '$scope'. Allowed values are: upcoming, past, all")
+        }
+
+        val now = Instant.now()
+        val appointments = when (normalizedScope) {
+            "upcoming" -> appointmentRepository.findAllByPatient_IdAndAppointmentDateGreaterThanEqualOrderByAppointmentDateAsc(patient.id!!, now)
+            "past" -> appointmentRepository.findAllByPatient_IdAndAppointmentDateLessThanOrderByAppointmentDateDesc(patient.id!!, now)
+            else -> appointmentRepository.findAllByPatient_IdOrderByAppointmentDateAsc(patient.id!!)
+        }
+
+        return AppointmentListResponse(
+            scope = normalizedScope,
+            count = appointments.size,
+            appointments = appointments.map { it.toSummary() }
+        )
+    }
+
+    @Transactional(readOnly = true)
+    fun getAppointmentForPatient(patientEmail: String, appointmentId: UUID): AppointmentSummaryResponse {
+        val patient = userRepository.findByEmail(patientEmail)
+            .orElseThrow { ResourceNotFoundException("Authenticated patient was not found") }
+
+        val appointment = appointmentRepository.findById(appointmentId)
+            .orElseThrow { ResourceNotFoundException("Appointment not found with ID: $appointmentId") }
+
+        if (appointment.patient?.id != patient.id) {
+            throw ResourceNotFoundException("Appointment not found with ID: $appointmentId")
+        }
+
+        return appointment.toSummary()
+    }
+
+    @Transactional
+    fun cancelAppointment(patientEmail: String, appointmentId: UUID): MessageResponse {
+        val patient = userRepository.findByEmail(patientEmail)
+            .orElseThrow { ResourceNotFoundException("Authenticated patient was not found") }
+
+        val appointment = appointmentRepository.findById(appointmentId)
+            .orElseThrow { ResourceNotFoundException("Appointment not found with ID: $appointmentId") }
+
+        if (appointment.patient?.id != patient.id) {
+            throw ResourceNotFoundException("Appointment not found with ID: $appointmentId")
+        }
+
+        val appointmentDate = appointment.appointmentDate
+            ?: throw AppException("Appointment has no scheduled date")
+
+        if (!appointmentDate.isAfter(Instant.now())) {
+            throw AppException("Appointment cannot be cancelled because it already started")
+        }
+
+        appointmentRepository.delete(appointment)
+        return MessageResponse("Appointment cancelled successfully")
+    }
+
+    @Transactional(readOnly = true)
+    fun getDoctorAppointments(doctorEmail: String, date: LocalDate?): List<AppointmentSummaryResponse> {
+        val doctor = userRepository.findByEmail(doctorEmail)
+            .orElseThrow { ResourceNotFoundException("Authenticated doctor was not found") }
+
+        val appointments = if (date != null) {
+            requireDateNotPast(date)
+            val from = date.atStartOfDay(zoneId).toInstant()
+            val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
+            appointmentRepository.findAllByDoctorIdAndAppointmentDateBetween(doctor.id!!, from, to)
+                .sortedBy { it.appointmentDate }
+        } else {
+            appointmentRepository.findAllByDoctor_IdAndAppointmentDateGreaterThanEqualOrderByAppointmentDateAsc(doctor.id!!, Instant.now())
+        }
+
+        return appointments.map { it.toSummary() }
+    }
+
+    @Transactional(readOnly = true)
+    fun getClinicAppointments(clinicEmail: String, date: LocalDate?, doctorId: UUID?): List<AppointmentSummaryResponse> {
+        val clinic = clinicRepository.findByUserEmail(clinicEmail)
+            .orElseThrow { ResourceNotFoundException("Clinic profile not found for authenticated clinic") }
+        val clinicUserId = clinic.user!!.id!!
+
+        var appointments = if (date != null) {
+            requireDateNotPast(date)
+            val from = date.atStartOfDay(zoneId).toInstant()
+            val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
+            appointmentRepository.findAllByClinicIdAndAppointmentDateBetween(clinicUserId, from, to)
+                .sortedBy { it.appointmentDate }
+        } else {
+            appointmentRepository.findAllByClinic_IdAndAppointmentDateGreaterThanEqualOrderByAppointmentDateAsc(clinicUserId, Instant.now())
+        }
+
+        if (doctorId != null) {
+            if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinicUserId, doctorId)) {
+                throw ResourceNotFoundException("Doctor is not associated with this clinic")
             }
-            .filter { status == null || it.status == status }
-            .filter { doctorId == null || it.doctor?.id == doctorId }
-            .sortedBy { it.appointmentDate }
-            .map { it.toFilterResponse() }
-            .toList()
+            appointments = appointments.filter { it.doctor?.id == doctorId }
+        }
+
+        return appointments.map { it.toSummary() }
     }
 
-    @Transactional
-    fun updateStatus(email: String, appointmentId: UUID, request: UpdateAppointmentStatusRequest): AppointmentFilterResponse {
-        val clinicUser = userRepository.findByEmail(email).orElseThrow { ResourceNotFoundException("User not found") }
-        if (clinicUser.role != Role.CLINIC) throw AppException("Only a clinic can update appointment status")
-        val appointment = getAppointment(appointmentId)
-        if (appointment.clinic?.id != clinicUser.id) throw AppException("You cannot modify this appointment")
-
-        val newStatus = request.status
-        if (appointment.status == AppointmentStatus.CANCELLED && newStatus != AppointmentStatus.CANCELLED) {
-            throw AppException("A cancelled appointment cannot be reactivated")
-        }
-        appointment.status = newStatus
-        return appointmentRepository.save(appointment).toFilterResponse()
-    }
-
-    @Transactional
-    fun reschedule(email: String, appointmentId: UUID, request: RescheduleAppointmentRequest): AppointmentFilterResponse {
-        val user = userRepository.findByEmail(email).orElseThrow { ResourceNotFoundException("User not found") }
-        val appointment = getAppointment(appointmentId)
-        val allowed = when (user.role) {
-            Role.CLINIC -> appointment.clinic?.id == user.id
-            Role.PATIENT -> appointment.patient?.id == user.id
-            else -> false
-        }
-        if (!allowed) throw AppException("You cannot reschedule this appointment")
-        if (appointment.status == AppointmentStatus.CANCELLED || appointment.status == AppointmentStatus.COMPLETED) {
-            throw AppException("This appointment cannot be rescheduled")
-        }
-
-        val date = request.appointmentDate ?: throw AppException("Appointment date is required")
-        val time = request.appointmentTime ?: throw AppException("Appointment time is required")
-        if (date.isBefore(LocalDate.now(zoneId))) throw AppException("Appointment date cannot be in the past")
-        if (time.minute != 0 || time.second != 0 || time.nano != 0) throw AppException("Appointments must start on a 60-minute slot")
-
-        val clinicUserId = appointment.clinic!!.id!!
-        val clinic = clinicRepository.findByUserId(clinicUserId).orElseThrow { ResourceNotFoundException("Clinic not found") }
-        val doctor = appointment.doctor!!
-        if (!doctor.isActive) throw AppException("Doctor account is inactive")
-        if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinicUserId, doctor.id!!)) throw AppException("Doctor is not associated with the clinic")
-
-        val schedules = scheduleRepository.findByClinicId(clinic.id!!)
-        if (scheduleRepository.existsByClinicIdAndSpecificDateAndType(clinic.id!!, date, ScheduleType.HOLIDAY)) throw AppException("Clinic is closed on the selected date")
-        if (schedules.any { it.doctor?.id == doctor.id && it.type == ScheduleType.HOLIDAY && it.specificDate == date }) throw AppException("Doctor is unavailable on the selected date")
-
-        val clinicSchedule = scheduleRepository.findByClinicIdAndTypeAndDayOfWeek(clinic.id!!, ScheduleType.CLINIC_HOURS, date.dayOfWeek) ?: throw AppException("Clinic is closed on this day")
-        val doctorSchedule = schedules.firstOrNull { it.doctor?.id == doctor.id && it.type == ScheduleType.DOCTOR_SHIFT && it.dayOfWeek == date.dayOfWeek } ?: throw AppException("Doctor is not scheduled on this day")
-        val start = maxOf(clinicSchedule.startTime!!, doctorSchedule.startTime!!)
-        val end = minOf(clinicSchedule.endTime!!, doctorSchedule.endTime!!)
-        if (time.isBefore(start) || time.plusMinutes(60).isAfter(end)) throw AppException("Selected time is outside available working hours")
-
-        val newInstant = date.atTime(time).atZone(zoneId).toInstant()
-        if (newInstant.isBefore(Instant.now())) throw AppException("Appointment time must be in the future")
-        val conflict = appointmentRepository.existsByDoctorIdAndAppointmentDate(doctor.id!!, newInstant)
-        if (conflict && appointment.appointmentDate != newInstant) throw DuplicateResourceException("The selected appointment slot is already booked")
-
-        appointment.appointmentDate = newInstant
-        appointment.status = AppointmentStatus.PENDING
-        return try {
-            appointmentRepository.saveAndFlush(appointment).toFilterResponse()
-        } catch (_: DataIntegrityViolationException) {
-            throw DuplicateResourceException("The selected appointment slot is already booked")
+    private fun requireDateNotPast(date: LocalDate) {
+        if (date.isBefore(LocalDate.now(zoneId))) {
+            throw AppException("Date cannot be in the past")
         }
     }
 
-    private fun getAppointment(id: UUID) = appointmentRepository.findById(id).orElseThrow { ResourceNotFoundException("Appointment not found with ID: $id") }
+    private fun Appointment.toSummary(): AppointmentSummaryResponse {
+        val clinicUser = clinic!!
+        val clinicEntity = clinicRepository.findByUserId(clinicUser.id!!).orElse(null)
 
-    private fun Appointment.toFilterResponse() = AppointmentFilterResponse(
-        appointmentId = id!!,
-        patientId = patient!!.id!!,
-        patientName = patient!!.fullName,
-        clinicId = clinicRepository.findByUserId(clinic!!.id!!).orElseThrow { ResourceNotFoundException("Clinic not found") }.id!!,
-        clinicName = clinicRepository.findByUserId(clinic!!.id!!).orElseThrow { ResourceNotFoundException("Clinic not found") }.clinicName,
-        doctorId = doctor!!.id!!,
-        doctorName = doctor!!.fullName,
-        serviceId = service!!.id!!,
-        serviceName = service!!.serviceName,
-        appointmentAt = appointmentDate!!.atZone(zoneId).toOffsetDateTime(),
-        status = status,
-        createdAt = createdAt.atZone(zoneId).toOffsetDateTime()
-    )
+        return AppointmentSummaryResponse(
+            appointmentId = id!!,
+            clinicId = service?.clinic?.id ?: clinicEntity?.id ?: clinicUser.id!!,
+            clinicName = clinicEntity?.clinicName ?: clinicUser.fullName,
+            doctorId = doctor!!.id!!,
+            doctorName = doctor!!.fullName,
+            patientId = patient!!.id!!,
+            patientName = patient!!.fullName,
+            serviceId = service!!.id!!,
+            serviceName = service!!.serviceName,
+            scheduleId = schedule?.id,
+            appointmentAt = appointmentDate!!.atZone(zoneId).toOffsetDateTime(),
+            createdAt = createdAt.atZone(zoneId).toOffsetDateTime()
+        )
+    }
 }

@@ -1,38 +1,58 @@
 package com.example.demo.controller
 
-import com.example.demo.dto.*
-import com.example.demo.model.AppointmentStatus
+import com.example.demo.dto.AppointmentListResponse
+import com.example.demo.dto.AppointmentSummaryResponse
+import com.example.demo.dto.MessageResponse
 import com.example.demo.service.AppointmentService
-import jakarta.validation.Valid
+import org.springframework.format.annotation.DateTimeFormat
 import org.springframework.http.ResponseEntity
+import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
+import java.time.LocalDate
 import java.util.UUID
 
 @RestController
-@RequestMapping("/api/appointments")
 class AppointmentController(private val appointmentService: AppointmentService) {
-    @GetMapping
-    fun list(
+
+    @GetMapping("/api/patient/appointments")
+    @PreAuthorize("hasRole('PATIENT')")
+    fun myAppointments(
         authentication: Authentication,
-        @RequestParam(required = false) status: AppointmentStatus?,
+        @RequestParam(required = false, defaultValue = "upcoming") scope: String
+    ): ResponseEntity<AppointmentListResponse> =
+        ResponseEntity.ok(appointmentService.getMyAppointments(authentication.name, scope))
+
+    @GetMapping("/api/patient/appointments/{appointmentId}")
+    @PreAuthorize("hasRole('PATIENT')")
+    fun appointmentDetails(
+        authentication: Authentication,
+        @PathVariable appointmentId: UUID
+    ): ResponseEntity<AppointmentSummaryResponse> =
+        ResponseEntity.ok(appointmentService.getAppointmentForPatient(authentication.name, appointmentId))
+
+    @DeleteMapping("/api/patient/appointments/{appointmentId}")
+    @PreAuthorize("hasRole('PATIENT')")
+    fun cancelAppointment(
+        authentication: Authentication,
+        @PathVariable appointmentId: UUID
+    ): ResponseEntity<MessageResponse> =
+        ResponseEntity.ok(appointmentService.cancelAppointment(authentication.name, appointmentId))
+
+    @GetMapping("/api/doctor/appointments")
+    @PreAuthorize("hasRole('DOCTOR')")
+    fun doctorAppointments(
+        authentication: Authentication,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) date: LocalDate?
+    ): ResponseEntity<List<AppointmentSummaryResponse>> =
+        ResponseEntity.ok(appointmentService.getDoctorAppointments(authentication.name, date))
+
+    @GetMapping("/api/clinic/appointments")
+    @PreAuthorize("hasRole('CLINIC')")
+    fun clinicAppointments(
+        authentication: Authentication,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) date: LocalDate?,
         @RequestParam(required = false) doctorId: UUID?
-    ): ResponseEntity<List<AppointmentFilterResponse>> =
-        ResponseEntity.ok(appointmentService.listAppointments(authentication.name, status, doctorId))
-
-    @PatchMapping("/{appointmentId}/status")
-    fun updateStatus(
-        authentication: Authentication,
-        @PathVariable appointmentId: UUID,
-        @Valid @RequestBody request: UpdateAppointmentStatusRequest
-    ): ResponseEntity<AppointmentFilterResponse> =
-        ResponseEntity.ok(appointmentService.updateStatus(authentication.name, appointmentId, request))
-
-    @PutMapping("/{appointmentId}/reschedule")
-    fun reschedule(
-        authentication: Authentication,
-        @PathVariable appointmentId: UUID,
-        @Valid @RequestBody request: RescheduleAppointmentRequest
-    ): ResponseEntity<AppointmentFilterResponse> =
-        ResponseEntity.ok(appointmentService.reschedule(authentication.name, appointmentId, request))
+    ): ResponseEntity<List<AppointmentSummaryResponse>> =
+        ResponseEntity.ok(appointmentService.getClinicAppointments(authentication.name, date, doctorId))
 }
