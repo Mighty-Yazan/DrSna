@@ -8,11 +8,14 @@ import java.util.UUID
 
 @Repository
 interface ScheduleRepository : JpaRepository<Schedule, UUID> {
-    fun findAllByClinicIdOrderByDoctorIdAscDayOfWeekAscStartTimeAsc(clinicId: UUID): List<Schedule>
-    fun findAllByClinicIdAndDoctorIdAndDayOfWeekOrderByStartTimeAsc(
+
+    fun findAllByClinicIdOrderByDoctorUserIdAscDayOfWeekAscStartTimeAsc(clinicId: UUID): List<Schedule>
+
+    fun findAllByClinicIdAndDoctorUserIdAndDayOfWeekOrderByStartTimeAsc(
         clinicId: UUID,
-        doctorId: UUID,
+        doctorUserId: UUID,
         dayOfWeek: DayOfWeek
     ): List<Schedule>
+
     fun findAllByClinicIdAndDayOfWeek(clinicId: UUID, dayOfWeek: DayOfWeek): List<Schedule>
 }
