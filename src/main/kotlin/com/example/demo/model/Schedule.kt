@@ -8,17 +8,14 @@ import java.util.UUID
 @Table(name = "schedules")
 class Schedule(
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(name = "schedule_id", updatable = false, nullable = false)
-    var id: UUID? = null,
+    @GeneratedValue(strategy = GenerationType.AUTO)
+    val id: UUID? = null,
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "clinic_id", nullable = false)
-    var clinic: Clinic? = null,
+    @Column(name = "clinic_id", nullable = false)
+    val clinicId: UUID,
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "doctor_user_id", nullable = false)
-    var doctor: User? = null,
+    @Column(name = "doctor_user_id", nullable = false)
+    val doctorUserId: UUID,
 
     @Enumerated(EnumType.STRING)
     @Column(name = "day_of_week", nullable = false, length = 20)

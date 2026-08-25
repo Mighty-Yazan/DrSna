@@ -67,12 +67,11 @@ class PatientService(
             .mapNotNull { relation ->
                 val doctor = relation.doctor ?: return@mapNotNull null
                 val schedules = scheduleRepository
-                    .findAllByClinicIdAndDoctorIdAndDayOfWeekOrderByStartTimeAsc(clinicId, doctor.id!!, DayOfWeek.MONDAY)
+                    .findAllByClinicIdAndDoctorUserIdAndDayOfWeekOrderByStartTimeAsc(clinicId, doctor.id!!, DayOfWeek.MONDAY)
                     .let { monday ->
-                        // Fetch the remaining days as well; keeping this explicit avoids relying on an ORM collection.
                         DayOfWeek.values().flatMap { day ->
                             if (day == DayOfWeek.MONDAY) monday
-                            else scheduleRepository.findAllByClinicIdAndDoctorIdAndDayOfWeekOrderByStartTimeAsc(clinicId, doctor.id!!, day)
+                            else scheduleRepository.findAllByClinicIdAndDoctorUserIdAndDayOfWeekOrderByStartTimeAsc(clinicId, doctor.id!!, day)
                         }
                     }
                     .sortedWith(compareBy<Schedule> { it.dayOfWeek.value }.thenBy { it.startTime })
@@ -114,7 +113,7 @@ class PatientService(
         val now = Instant.now()
         return doctorRelations.flatMap { relation ->
             val doctor = relation.doctor ?: return@flatMap emptyList()
-            val schedules = scheduleRepository.findAllByClinicIdAndDoctorIdAndDayOfWeekOrderByStartTimeAsc(
+            val schedules = scheduleRepository.findAllByClinicIdAndDoctorUserIdAndDayOfWeekOrderByStartTimeAsc(
                 clinicId, doctor.id!!, date.dayOfWeek
             )
             val from = date.atStartOfDay(zoneId).toInstant()
@@ -170,7 +169,7 @@ class PatientService(
         if (doctor.role != Role.DOCTOR) throw AppException("Selected user is not a doctor")
         if (patient.role != Role.PATIENT) throw AppException("Only patients can create appointments")
         if (service.clinic?.id != clinicId) throw AppException("Service does not belong to the selected clinic")
-        if (schedule.clinic?.id != clinicId || schedule.doctor?.id != doctorId) {
+        if (schedule.clinicId != clinicId || schedule.doctorUserId != doctorId) {
             throw AppException("Schedule does not belong to the selected clinic and doctor")
         }
         if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinic.user!!.id!!, doctorId)) {
@@ -220,7 +219,7 @@ class PatientService(
             val doctor = relation.doctor ?: return@any false
             val booked = appointmentRepository.findAllByDoctorIdAndAppointmentDateBetween(doctor.id!!, from, to)
                 .mapNotNull { it.appointmentDate }.toHashSet()
-            scheduleRepository.findAllByClinicIdAndDoctorIdAndDayOfWeekOrderByStartTimeAsc(clinicId, doctor.id!!, date.dayOfWeek)
+            scheduleRepository.findAllByClinicIdAndDoctorUserIdAndDayOfWeekOrderByStartTimeAsc(clinicId, doctor.id!!, date.dayOfWeek)
                 .flatMap { schedule -> generateSlots(schedule.startTime, schedule.endTime) }
                 .any { time ->
                     val instant = date.atTime(time).atZone(zoneId).toInstant()

@@ -1,14 +1,12 @@
 package com.example.demo.service
 
 import com.example.demo.dto.*
-import com.example.demo.exception.ResourceNotFoundException
-import com.example.demo.exception.DuplicateResourceException
 import com.example.demo.exception.AppException
-import com.example.demo.model.Clinic
-import com.example.demo.model.Services
-import com.example.demo.repository.ClinicRepository
-import com.example.demo.repository.ServicesRepository
-import com.example.demo.repository.UserRepository
+import com.example.demo.exception.DuplicateResourceException
+import com.example.demo.exception.ResourceNotFoundException
+import com.example.demo.model.*
+import com.example.demo.repository.*
+import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -18,12 +16,11 @@ import java.util.UUID
 class ClinicAdminService(
     private val clinicRepository: ClinicRepository,
     private val servicesRepository: ServicesRepository,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val clinicDoctorRepository: ClinicDoctorRepository,
+    private val passwordEncoder: PasswordEncoder
 ) {
-
-
-    // CLINIC
-
+    // ── CLINIC PROFILE ──────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     fun getProfile(userEmail: String): ClinicProfileResponse {
@@ -46,9 +43,7 @@ class ClinicAdminService(
         return updatedClinic.toResponse()
     }
 
-
-    // SERVICES
-
+    // ── SERVICES ────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     fun getServices(userEmail: String): List<ServicesResponse> {
@@ -110,8 +105,89 @@ class ClinicAdminService(
         servicesRepository.delete(service)
     }
 
+    // ── DOCTORS MANAGEMENT ──────────────────────────────────────────────
 
-//reusuable functions
+    @Transactional(readOnly = true)
+    fun getDoctors(clinicEmail: String): List<DoctorResponse> {
+        val clinic = getOrCreateClinic(clinicEmail)
+        val clinicUserId = clinic.user!!.id!!
+
+        return clinicDoctorRepository.findAllByClinic_Id(clinicUserId)
+            .map { cd -> cd.doctor!!.toDoctorResponse() }
+    }
+
+    fun addDoctor(clinicEmail: String, request: AddDoctorRequest): DoctorResponse {
+        // 1. التأكد من وجود العيادة وحفظها أولاً لتفادي خطأ Foreign Key
+        val clinic = getOrCreateClinic(clinicEmail)
+        val clinicUser = clinic.user ?: throw IllegalStateException("Clinic missing linked user")
+
+        if (userRepository.existsByEmail(request.email.trim())) {
+            throw DuplicateResourceException("User with email '${request.email}' already exists")
+        }
+
+        // 2. إنشاء حساب الطبيب وتشفير الباسورد
+        val doctorUser = userRepository.save(
+            User(
+                fullName = request.fullName.trim(),
+                city = request.city,
+                email = request.email.trim().lowercase(),
+                password = passwordEncoder.encode(request.password)!!,
+                role = Role.DOCTOR,
+                isActive = true
+            )
+        )
+
+        // 3. ربطه بالعيادة في جدول clinic_doctors
+        val clinicDoctor = ClinicDoctor(
+            id = ClinicDoctorId(doctorUserId = doctorUser.id!!, clinicUserId = clinicUser.id!!),
+            doctor = doctorUser,
+            clinic = clinicUser
+        )
+        clinicDoctorRepository.save(clinicDoctor)
+
+        return doctorUser.toDoctorResponse()
+    }
+
+    fun updateDoctor(clinicEmail: String, doctorUserId: UUID, request: UpdateDoctorRequest): DoctorResponse {
+        val clinic = getOrCreateClinic(clinicEmail)
+        val clinicUserId = clinic.user!!.id!!
+
+        if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinicUserId, doctorUserId)) {
+            throw ResourceNotFoundException("Doctor not found in your clinic catalog")
+        }
+
+        val doctorUser = userRepository.findById(doctorUserId)
+            .orElseThrow { ResourceNotFoundException("Doctor user not found with ID: $doctorUserId") }
+
+        doctorUser.fullName = request.fullName.trim()
+        if (request.city != null) {
+            doctorUser.city = request.city
+        }
+
+        val updatedDoctor = userRepository.save(doctorUser)
+        return updatedDoctor.toDoctorResponse()
+    }
+
+    @Transactional
+    fun toggleDoctorStatus(clinicEmail: String, doctorUserId: UUID): MessageResponse {
+        val clinic = getOrCreateClinic(clinicEmail)
+        val clinicUserId = clinic.user!!.id!!
+
+        if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinicUserId, doctorUserId)) {
+            throw ResourceNotFoundException("Doctor not found in your clinic catalog")
+        }
+
+        val doctorUser = userRepository.findById(doctorUserId)
+            .orElseThrow { ResourceNotFoundException("Doctor user not found with ID: $doctorUserId") }
+
+        doctorUser.isActive = !doctorUser.isActive
+        userRepository.save(doctorUser)
+
+        val status = if (doctorUser.isActive) "activated" else "deactivated"
+        return MessageResponse("Doctor status successfully $status")
+    }
+
+    // ── REUSABLE HELPERS ────────────────────────────────────────────────
 
     private fun getOrCreateClinic(userEmail: String): Clinic {
         return clinicRepository.findByUserEmail(userEmail).orElseGet {
@@ -144,6 +220,28 @@ class ClinicAdminService(
         id = this.id!!,
         clinicId = this.clinic?.id ?: throw IllegalStateException("Service missing linked clinic"),
         serviceName = this.serviceName,
-        descriptionOfService = this.descriptionOfService,
+        descriptionOfService = this.descriptionOfService
     )
+
+    private fun User.toDoctorResponse() = DoctorResponse(
+        doctorUserId = this.id!!,
+        fullName = this.fullName,
+        email = this.email,
+        city = this.city,
+        role = this.role,
+        isActive = this.isActive
+    )
+
+    fun deleteDoctor(clinicEmail: String, doctorUserId: UUID) {
+        val clinic = getOrCreateClinic(clinicEmail)
+        val clinicUserId = clinic.user!!.id!!
+
+        val clinicDoctorId = ClinicDoctorId(doctorUserId = doctorUserId, clinicUserId = clinicUserId)
+
+        if (!clinicDoctorRepository.existsById(clinicDoctorId)) {
+            throw ResourceNotFoundException("Doctor not found in your clinic catalog")
+        }
+
+        clinicDoctorRepository.deleteById(clinicDoctorId)
+    }
 }
