@@ -18,7 +18,10 @@ class ClinicAdminService(
     private val servicesRepository: ServicesRepository,
     private val userRepository: UserRepository,
     private val clinicDoctorRepository: ClinicDoctorRepository,
-    private val passwordEncoder: PasswordEncoder
+    private val passwordEncoder: PasswordEncoder,
+    private val specialtyRepository: SpecialtyRepository,
+    private val clinicSpecialtyRepository: ClinicSpecialtyRepository,
+    private val reviewRepository: ReviewRepository
 ) {
     // ── CLINIC PROFILE ──────────────────────────────────────────────────
 
@@ -105,6 +108,58 @@ class ClinicAdminService(
         servicesRepository.delete(service)
     }
 
+
+    fun addSpecialty(userEmail: String, request: SpecialtyRequest): SpecialtyResponse {
+        val clinic = getOrCreateClinic(userEmail)
+        val name = request.name.trim()
+        val specialty = specialtyRepository.findByNameIgnoreCase(name)
+            ?: specialtyRepository.save(Specialty(name = name))
+        val clinicId = clinic.id!!
+        val specialtyId = specialty.id!!
+        if (!clinicSpecialtyRepository.existsByClinicIdAndSpecialtyId(clinicId, specialtyId)) {
+            clinicSpecialtyRepository.save(
+                ClinicSpecialty(
+                    id = ClinicSpecialtyId(clinicId, specialtyId),
+                    clinic = clinic,
+                    specialty = specialty
+                )
+            )
+        }
+        return SpecialtyResponse(specialtyId, specialty.name)
+    }
+
+    @Transactional(readOnly = true)
+    fun getSpecialties(userEmail: String): List<SpecialtyResponse> {
+        val clinic = getOrCreateClinic(userEmail)
+        return clinicSpecialtyRepository.findAllByClinicId(clinic.id!!).mapNotNull {
+            val specialty = it.specialty ?: return@mapNotNull null
+            SpecialtyResponse(specialty.id!!, specialty.name)
+        }
+    }
+
+    @Transactional(readOnly = true)
+    fun getReviews(userEmail: String, doctorId: UUID?, rating: Int?): List<ReviewResponse> {
+        val clinic = getOrCreateClinic(userEmail)
+        if (rating != null && rating !in 1..5) throw AppException("Rating must be between 1 and 5")
+        return reviewRepository.findAllByClinicIdOrderByCreatedAtDesc(clinic.id!!).asSequence()
+            .filter { doctorId == null || it.doctor?.id == doctorId }
+            .filter { rating == null || it.rating == rating }
+            .map { review ->
+                ReviewResponse(review.id!!, review.appointment!!.id!!, review.patient!!.id!!, review.patient!!.fullName, review.doctor!!.id!!, review.doctor!!.fullName, review.rating, review.comment, review.reply, review.replyAt?.atZone(java.time.ZoneId.of("Asia/Amman"))?.toOffsetDateTime(), review.createdAt.atZone(java.time.ZoneId.of("Asia/Amman")).toOffsetDateTime())
+            }.toList()
+    }
+
+    @Transactional
+    fun replyToReview(userEmail: String, reviewId: UUID, request: ReviewReplyRequest): ReviewResponse {
+        val clinic = getOrCreateClinic(userEmail)
+        val review = reviewRepository.findById(reviewId).orElseThrow { ResourceNotFoundException("Review not found") }
+        if (review.clinic?.id != clinic.id) throw AppException("You cannot reply to this review")
+        review.reply = request.reply.trim()
+        review.replyAt = java.time.Instant.now()
+        val saved = reviewRepository.save(review)
+        return ReviewResponse(saved.id!!, saved.appointment!!.id!!, saved.patient!!.id!!, saved.patient!!.fullName, saved.doctor!!.id!!, saved.doctor!!.fullName, saved.rating, saved.comment, saved.reply, saved.replyAt?.atZone(java.time.ZoneId.of("Asia/Amman"))?.toOffsetDateTime(), saved.createdAt.atZone(java.time.ZoneId.of("Asia/Amman")).toOffsetDateTime())
+    }
+
     // ── DOCTORS MANAGEMENT ──────────────────────────────────────────────
 
     @Transactional(readOnly = true)
@@ -133,7 +188,9 @@ class ClinicAdminService(
                 email = request.email.trim().lowercase(),
                 password = passwordEncoder.encode(request.password)!!,
                 role = Role.DOCTOR,
-                isActive = true
+                isActive = true,
+                bio = request.bio?.trim(),
+                specialty = request.specialty?.trim()
             )
         )
 
@@ -163,6 +220,8 @@ class ClinicAdminService(
         if (request.city != null) {
             doctorUser.city = request.city
         }
+        doctorUser.bio = request.bio?.trim()
+        doctorUser.specialty = request.specialty?.trim()
 
         val updatedDoctor = userRepository.save(doctorUser)
         return updatedDoctor.toDoctorResponse()
@@ -229,7 +288,9 @@ class ClinicAdminService(
         email = this.email,
         city = this.city,
         role = this.role,
-        isActive = this.isActive
+        isActive = this.isActive,
+        bio = this.bio,
+        specialty = this.specialty
     )
 
     fun deleteDoctor(clinicEmail: String, doctorUserId: UUID) {
@@ -242,6 +303,9 @@ class ClinicAdminService(
             throw ResourceNotFoundException("Doctor not found in your clinic catalog")
         }
 
-        clinicDoctorRepository.deleteById(clinicDoctorId)
+        val doctor = userRepository.findById(doctorUserId)
+            .orElseThrow { ResourceNotFoundException("Doctor user not found") }
+        doctor.isActive = false
+        userRepository.save(doctor)
     }
 }

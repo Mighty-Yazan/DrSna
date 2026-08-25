@@ -20,4 +20,4 @@ class Services (
 
     @Column(name="description_of_service",columnDefinition = "TEXT")
     var descriptionOfService: String? = null,
-    )
+)

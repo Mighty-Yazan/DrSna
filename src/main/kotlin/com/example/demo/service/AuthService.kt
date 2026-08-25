@@ -12,10 +12,13 @@ import com.example.demo.security.TokenBlacklistService
 import com.example.demo.security.TokenService
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 
 @Service
+@Transactional
 class AuthService(
     private val userRepository: UserRepository,
+    private val clinicRepository: com.example.demo.repository.ClinicRepository,
     private val passwordEncoder: PasswordEncoder,
     private val tokenService: TokenService,
     private val tokenBlacklistService: TokenBlacklistService
@@ -76,6 +79,13 @@ class AuthService(
 
         val savedUser = userRepository.save(newUser)
 
+        clinicRepository.save(
+            com.example.demo.model.Clinic(
+                user = savedUser,
+                clinicName = savedUser.fullName
+            )
+        )
+
         return AuthResponse(
             message = "Clinic registered successfully",
             userId = savedUser.id,
@@ -89,6 +99,10 @@ class AuthService(
 
         val user = userRepository.findByEmail(normalizedEmail)
             .orElseThrow { InvalidCredentialsException("Invalid email or password") }
+
+        if (!user.isActive) {
+            throw InvalidCredentialsException("Account is inactive")
+        }
 
         if (!passwordEncoder.matches(request.password, user.password)) {
             throw InvalidCredentialsException("Invalid email or password")
