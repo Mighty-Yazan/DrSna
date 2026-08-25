@@ -32,6 +32,12 @@ class User(
     @Column(name = "clinic_license_number", unique = true, length = 50)
     var clinicLicenseNumber: String? = null,
 
+    @Column(columnDefinition = "TEXT")
+    var bio: String? = null,
+
+    @Column(length = 100)
+    var specialty: String? = null,
+
     @Column(name = "created_at", nullable = false, updatable = false)
     val createdAt: Instant = Instant.now(),
 

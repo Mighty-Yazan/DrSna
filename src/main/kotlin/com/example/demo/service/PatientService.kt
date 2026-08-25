@@ -19,7 +19,9 @@ class PatientService(
     private val clinicDoctorRepository: ClinicDoctorRepository,
     private val scheduleRepository: ScheduleRepository,
     private val appointmentRepository: AppointmentRepository,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val clinicSpecialtyRepository: ClinicSpecialtyRepository,
+    private val reviewRepository: ReviewRepository
 ) {
     private val zoneId = ZoneId.of("Asia/Amman")
 
@@ -29,6 +31,7 @@ class PatientService(
         name: String?,
         service: String?,
         city: City?,
+        specialty: String?,
         date: LocalDate?,
         availableOnly: Boolean
     ): List<ClinicSummaryResponse> {
@@ -37,6 +40,7 @@ class PatientService(
 
         val normalizedName = name?.trim()?.takeIf { it.isNotEmpty() }
         val normalizedService = service?.trim()?.takeIf { it.isNotEmpty() }
+        val normalizedSpecialty = specialty?.trim()?.takeIf { it.isNotEmpty() }
         if (availableOnly && date == null) {
             throw AppException("A date is required when filtering by availability")
         }
@@ -45,6 +49,9 @@ class PatientService(
         return clinics.asSequence()
             .filter { clinic ->
                 normalizedService == null || servicesRepository.existsByClinicIdAndServiceNameIgnoreCase(clinic.id!!, normalizedService)
+            }
+            .filter { clinic ->
+                normalizedSpecialty == null || clinicSpecialtyRepository.findAllByClinicId(clinic.id!!).any { it.specialty?.name?.equals(normalizedSpecialty, ignoreCase = true) == true }
             }
             .map { clinic ->
                 val available = date?.let { hasAnyAvailableSlot(clinic.id!!, it) }
@@ -65,7 +72,11 @@ class PatientService(
 
         val allClinicSchedules = scheduleRepository.findByClinicId(clinicId)
 
+        val specialties = clinicSpecialtyRepository.findAllByClinicId(clinicId).mapNotNull { it.specialty?.name }
+        val reviews = reviewRepository.findAllByClinicIdOrderByCreatedAtDesc(clinicId).map { it.toReviewResponse(zoneId) }
+
         val doctors = clinicDoctorRepository.findAllByClinic_Id(clinic.user!!.id!!)
+            .filter { it.doctor?.isActive == true }
             .mapNotNull { relation ->
                 val doctor = relation.doctor ?: return@mapNotNull null
 
@@ -74,7 +85,7 @@ class PatientService(
                     .sortedWith(compareBy<Schedule> { it.dayOfWeek?.value ?: 0 }.thenBy { it.startTime })
                     .map { it.toResponse() }
 
-                DoctorDetailsResponse(doctor.id!!, doctor.fullName, doctor.email, schedules)
+                DoctorDetailsResponse(doctor.id!!, doctor.fullName, doctor.email, doctor.specialty, doctor.bio, doctor.isActive, schedules)
             }
 
         return ClinicDetailsResponse(
@@ -90,7 +101,9 @@ class PatientService(
             description = clinic.description,
             workingHours = clinic.workingHours,
             services = services,
-            doctors = doctors
+            specialties = specialties,
+            doctors = doctors,
+            reviews = reviews
         )
     }
 
@@ -118,6 +131,7 @@ class PatientService(
 
         return doctorRelations.flatMap { relation ->
             val doctor = relation.doctor ?: return@flatMap emptyList()
+            if (!doctor.isActive) return@flatMap emptyList()
 
             val isDoctorHoliday = allSchedules.any {
                 it.doctor?.id == doctor.id && it.type == ScheduleType.HOLIDAY && it.specificDate == date
@@ -135,6 +149,7 @@ class PatientService(
             val from = date.atStartOfDay(zoneId).toInstant()
             val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
             val booked = appointmentRepository.findAllByDoctorIdAndAppointmentDateBetween(doctor.id!!, from, to)
+                .filter { it.status != AppointmentStatus.CANCELLED }
                 .mapNotNull { it.appointmentDate }
                 .toHashSet()
 
@@ -201,6 +216,7 @@ class PatientService(
 
         if (doctor.role != Role.DOCTOR) throw AppException("Selected user is not a doctor")
         if (patient.role != Role.PATIENT) throw AppException("Only patients can create appointments")
+        if (!doctor.isActive) throw AppException("Doctor account is inactive and cannot receive bookings")
 
         val serviceClinicId = service.clinic?.id
         if (serviceClinicId != null && serviceClinicId != clinicId) {
@@ -262,6 +278,26 @@ class PatientService(
         return saved.toResponse(zoneId)
     }
 
+    @Transactional
+    fun createReview(patientEmail: String, request: CreateReviewRequest): ReviewResponse {
+        val appointmentId = request.appointmentId ?: throw AppException("Appointment ID is required")
+        val patient = userRepository.findByEmail(patientEmail).orElseThrow { ResourceNotFoundException("Patient not found") }
+        val appointment = appointmentRepository.findById(appointmentId).orElseThrow { ResourceNotFoundException("Appointment not found") }
+        if (appointment.patient?.id != patient.id) throw AppException("You can review only your own appointment")
+        if (appointment.status == AppointmentStatus.CANCELLED) throw AppException("Cancelled appointments cannot be reviewed")
+        if (reviewRepository.existsByAppointmentId(appointmentId)) throw DuplicateResourceException("This appointment has already been reviewed")
+        val review = reviewRepository.save(Review(appointment = appointment, patient = patient, clinic = clinicRepository.findByUserId(appointment.clinic!!.id!!).orElseThrow { ResourceNotFoundException("Clinic not found") }, doctor = appointment.doctor, rating = request.rating, comment = request.comment?.trim()))
+        recalculateClinicRating(review.clinic!!.id!!)
+        return review.toReviewResponse(zoneId)
+    }
+
+    private fun recalculateClinicRating(clinicId: UUID) {
+        val clinic = clinicRepository.findById(clinicId).orElseThrow { ResourceNotFoundException("Clinic not found") }
+        val reviews = reviewRepository.findAllByClinicId(clinicId)
+        clinic.rating = if (reviews.isEmpty()) java.math.BigDecimal.ZERO else reviews.map { it.rating }.average().toBigDecimal().setScale(1, java.math.RoundingMode.HALF_UP)
+        clinicRepository.save(clinic)
+    }
+
     private fun hasAnyAvailableSlot(clinicId: UUID, date: LocalDate): Boolean {
         if (date.isBefore(LocalDate.now(zoneId))) return false
         val clinic = clinicRepository.findById(clinicId).orElse(null) ?: return false
@@ -281,6 +317,7 @@ class PatientService(
 
         return relations.any { relation ->
             val doctor = relation.doctor ?: return@any false
+            if (!doctor.isActive) return@any false
 
             val isDoctorHoliday = allSchedules.any {
                 it.doctor?.id == doctor.id && it.type == ScheduleType.HOLIDAY && it.specificDate == date
@@ -296,6 +333,7 @@ class PatientService(
             if (start >= end) return@any false
 
             val booked = appointmentRepository.findAllByDoctorIdAndAppointmentDateBetween(doctor.id!!, from, to)
+                .filter { it.status != AppointmentStatus.CANCELLED }
                 .mapNotNull { it.appointmentDate }.toHashSet()
 
             generateSlots(start, end).any { time ->
@@ -350,6 +388,12 @@ class PatientService(
         workingHoursDoctor = if (startTime != null && endTime != null) "$startTime - $endTime" else null
     )
 
+    private fun Review.toReviewResponse(zoneId: ZoneId) = ReviewResponse(
+        reviewId = id!!, appointmentId = appointment!!.id!!, patientId = patient!!.id!!, patientName = patient!!.fullName,
+        doctorId = doctor!!.id!!, doctorName = doctor!!.fullName, rating = rating, comment = comment, reply = reply,
+        replyAt = replyAt?.atZone(zoneId)?.toOffsetDateTime(), createdAt = createdAt.atZone(zoneId).toOffsetDateTime()
+    )
+
     private fun Appointment.toResponse(zoneId: ZoneId) = AppointmentResponse(
         appointmentId = id!!,
         patientId = patient!!.id!!,
@@ -360,6 +404,7 @@ class PatientService(
         serviceName = service!!.serviceName,
         scheduleId = schedule?.id,
         appointmentAt = appointmentDate!!.atZone(zoneId).toOffsetDateTime(),
-        createdAt = createdAt.atZone(zoneId).toOffsetDateTime()
+        createdAt = createdAt.atZone(zoneId).toOffsetDateTime(),
+        status = status
     )
 }

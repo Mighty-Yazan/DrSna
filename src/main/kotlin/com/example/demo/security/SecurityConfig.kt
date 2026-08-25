@@ -4,6 +4,7 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret
 import com.nimbusds.jose.proc.SecurityContext
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.security.authentication.AuthenticationManager
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
@@ -27,10 +28,10 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 @EnableWebSecurity
 @EnableMethodSecurity
 class SecurityConfig(
-    private val tokenBlacklistService: TokenBlacklistService
+    private val tokenBlacklistService: TokenBlacklistService,
+    @Value("\${jwt.secret:DrSnaClinicSuperSecretKeyForJwtTokens2026!!}")
+    private val jwtSecret: String
 ) {
-
-    private val jwtSecret = "DrSnaClinicSuperSecretKeyForJwtTokens2026!!"
 
     @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {

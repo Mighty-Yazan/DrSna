@@ -84,7 +84,8 @@ data class AddDoctorRequest(
     val password: String,
 
     val city: City = City.AMMAN,
-    val bio: String? = null
+    val bio: String? = null,
+    val specialty: String? = null
 )
 
 data class UpdateDoctorRequest(
@@ -93,7 +94,8 @@ data class UpdateDoctorRequest(
     val fullName: String,
 
     val city: City? = null,
-    val bio: String? = null
+    val bio: String? = null,
+    val specialty: String? = null
 )
 
 data class DoctorResponse(
@@ -103,5 +105,6 @@ data class DoctorResponse(
     val city: City,
     val role: Role = Role.DOCTOR,
     val isActive: Boolean = true,
-    val bio: String? = null
+    val bio: String? = null,
+    val specialty: String? = null
 )

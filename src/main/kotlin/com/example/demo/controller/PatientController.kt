@@ -24,10 +24,11 @@ class PatientController(private val patientService: PatientService) {
         @RequestParam(required = false) name: String?,
         @RequestParam(required = false) service: String?,
         @RequestParam(required = false) city: City?,
+        @RequestParam(required = false) specialty: String?,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) date: LocalDate?,
         @RequestParam(defaultValue = "false") availableOnly: Boolean
     ): ResponseEntity<List<ClinicSummaryResponse>> = ResponseEntity.ok(
-        patientService.searchClinics(authentication.name, name, service, city, date, availableOnly)
+        patientService.searchClinics(authentication.name, name, service, city, specialty, date, availableOnly)
     )
 
     @GetMapping("/clinics/{clinicId}")
@@ -41,6 +42,10 @@ class PatientController(private val patientService: PatientService) {
         @RequestParam(required = false) doctorId: UUID?
     ): ResponseEntity<List<AvailabilitySlotResponse>> =
         ResponseEntity.ok(patientService.getAvailability(clinicId, date, doctorId))
+
+    @PostMapping("/reviews")
+    fun createReview(authentication: Authentication, @Valid @RequestBody request: CreateReviewRequest): ResponseEntity<ReviewResponse> =
+        ResponseEntity.status(HttpStatus.CREATED).body(patientService.createReview(authentication.name, request))
 
     @PostMapping("/appointments")
     fun createAppointment(

@@ -70,6 +70,32 @@ class ClinicAdminController(
         return ResponseEntity.ok(MessageResponse("Service deleted successfully"))
     }
 
+
+    @GetMapping("/reviews")
+    fun getReviews(
+        authentication: Authentication,
+        @RequestParam(required = false) doctorId: UUID?,
+        @RequestParam(required = false) rating: Int?
+    ): ResponseEntity<List<ReviewResponse>> = ResponseEntity.ok(clinicAdminService.getReviews(authentication.name, doctorId, rating))
+
+    @PatchMapping("/reviews/{reviewId}/reply")
+    fun replyToReview(
+        authentication: Authentication,
+        @PathVariable reviewId: UUID,
+        @RequestBody request: ReviewReplyRequest
+    ): ResponseEntity<ReviewResponse> = ResponseEntity.ok(clinicAdminService.replyToReview(authentication.name, reviewId, request))
+
+    @GetMapping("/specialties")
+    fun getSpecialties(authentication: Authentication): ResponseEntity<List<SpecialtyResponse>> =
+        ResponseEntity.ok(clinicAdminService.getSpecialties(authentication.name))
+
+    @PostMapping("/specialties")
+    fun addSpecialty(
+        authentication: Authentication,
+        @Valid @RequestBody request: SpecialtyRequest
+    ): ResponseEntity<SpecialtyResponse> =
+        ResponseEntity.status(HttpStatus.CREATED).body(clinicAdminService.addSpecialty(authentication.name, request))
+
     // ── DOCTORS ENDPOINTS ───────────────────────────────────────────────
 
     @GetMapping("/doctors")

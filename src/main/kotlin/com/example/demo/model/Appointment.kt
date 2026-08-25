@@ -40,8 +40,12 @@ class Appointment(
     @JoinColumn(name = "schedule_id")
     var schedule: Schedule? = null,
 
-    @Column(name = "appointment_date")
+    @Column(name = "appointment_date", nullable = false)
     var appointmentDate: Instant? = null,
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    var status: AppointmentStatus = AppointmentStatus.PENDING,
 
     @Column(name = "created_at", nullable = false, updatable = false)
     val createdAt: Instant = Instant.now()

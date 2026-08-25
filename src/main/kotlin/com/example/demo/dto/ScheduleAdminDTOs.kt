@@ -34,3 +34,12 @@ data class SaveHolidayRequest(
     val reason: String?,
     val doctorId: String? = null
 )
+data class SaveScheduleRequest(
+    val type: ScheduleType,
+    val doctorId: String? = null,
+    val dayOfWeek: DayOfWeek? = null,
+    val startTime: LocalTime? = null,
+    val endTime: LocalTime? = null,
+    val specificDate: LocalDate? = null,
+    val reason: String? = null
+)
