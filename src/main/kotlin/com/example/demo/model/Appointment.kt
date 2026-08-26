@@ -9,8 +9,8 @@ import java.util.UUID
     name = "appointments",
     uniqueConstraints = [
         UniqueConstraint(
-            name = "uk_appointments_doctor_time",
-            columnNames = ["doctor_user_id", "appointment_date"]
+            name = "uk_appointments_booking_key",
+            columnNames = ["booking_key"]
         )
     ]
 )
@@ -46,6 +46,20 @@ class Appointment(
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     var status: AppointmentStatus = AppointmentStatus.PENDING,
+
+    /*
+     * This value uniquely reserves an active appointment slot.
+     *
+     * Example:
+     * doctorId + appointmentTime
+     *
+     * When an appointment is cancelled, bookingKey becomes null.
+     * PostgreSQL allows multiple NULL values in a UNIQUE column,
+     * therefore the cancelled appointment remains as history while
+     * the same time slot can be booked again.
+     */
+    @Column(name = "booking_key", unique = true, length = 100)
+    var bookingKey: String? = null,
 
     @Column(name = "created_at", nullable = false, updatable = false)
     val createdAt: Instant = Instant.now()

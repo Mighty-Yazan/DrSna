@@ -181,7 +181,6 @@ class PatientService(
 
         requireDateNotPast(date)
 
-        // تم التعديل: التحقق من أن الموعد يبدأ على رأس الساعة (الدقيقة 00) ولا يحتوي على ثوانٍ
         if (time.minute != 0 || time.second != 0 || time.nano != 0) {
             throw AppException("Appointments must start on a 60-minute slot (top of the hour)")
         }
@@ -252,29 +251,49 @@ class PatientService(
             throw AppException("Selected time is outside the doctor's available working hours")
         }
 
-        val appointmentAt = date.atTime(time).atZone(zoneId).toInstant()
+        val appointmentAt =
+            date
+                .atTime(time)
+                .atZone(zoneId)
+                .toInstant()
         if (appointmentAt.isBefore(Instant.now())) {
-            throw AppException("Appointment time must be in the future")
+            throw AppException(
+                "Appointment time must be in the future"
+            )
         }
-        if (appointmentRepository.existsByDoctorIdAndAppointmentDate(doctorId, appointmentAt)) {
-            throw DuplicateResourceException("The selected appointment slot is already booked")
+        val bookingKey =
+            "${doctorId}:$appointmentAt"
+        if (
+            appointmentRepository.existsByBookingKey(
+                bookingKey
+            )
+        ) {
+            throw DuplicateResourceException(
+                "The selected appointment slot is already booked"
+            )
         }
-
         val appointment = Appointment(
             clinic = clinic.user,
             doctor = doctor,
             patient = patient,
             service = service,
             schedule = schedule,
-            appointmentDate = appointmentAt
+            appointmentDate = appointmentAt,
+            status = AppointmentStatus.PENDING,
+            bookingKey = bookingKey
         )
-
-        val saved = try {
-            appointmentRepository.saveAndFlush(appointment)
-        } catch (_: DataIntegrityViolationException) {
-            throw DuplicateResourceException("The selected appointment slot is already booked")
-        }
-
+        val saved =
+            try {
+                appointmentRepository.saveAndFlush(
+                    appointment
+                )
+            } catch (
+                _: DataIntegrityViolationException
+            ) {
+                throw DuplicateResourceException(
+                    "The selected appointment slot is already booked"
+                )
+            }
         return saved.toResponse(zoneId)
     }
 
@@ -283,9 +302,30 @@ class PatientService(
         val appointmentId = request.appointmentId ?: throw AppException("Appointment ID is required")
         val patient = userRepository.findByEmail(patientEmail).orElseThrow { ResourceNotFoundException("Patient not found") }
         val appointment = appointmentRepository.findById(appointmentId).orElseThrow { ResourceNotFoundException("Appointment not found") }
-        if (appointment.patient?.id != patient.id) throw AppException("You can review only your own appointment")
-        if (appointment.status == AppointmentStatus.CANCELLED) throw AppException("Cancelled appointments cannot be reviewed")
-        if (reviewRepository.existsByAppointmentId(appointmentId)) throw DuplicateResourceException("This appointment has already been reviewed")
+
+        if (appointment.patient?.id != patient.id) {
+            throw AppException(
+                "You can review only your own appointment"
+            )
+        }
+        if (
+            appointment.status !=
+            AppointmentStatus.COMPLETED
+        ) {
+            throw AppException(
+                "Only completed appointments can be reviewed"
+            )
+        }
+        if (
+            reviewRepository.existsByAppointmentId(
+                appointmentId
+            )
+        ) {
+            throw DuplicateResourceException(
+                "This appointment has already been reviewed"
+            )
+        }
+
         val review = reviewRepository.save(Review(appointment = appointment, patient = patient, clinic = clinicRepository.findByUserId(appointment.clinic!!.id!!).orElseThrow { ResourceNotFoundException("Clinic not found") }, doctor = appointment.doctor, rating = request.rating, comment = request.comment?.trim()))
         recalculateClinicRating(review.clinic!!.id!!)
         return review.toReviewResponse(zoneId)
@@ -343,19 +383,71 @@ class PatientService(
         }
     }
 
-    // تم التعديل: زيادة الوقت بـ 60 دقيقة في الحلقة التكرارية
-    private fun generateSlots(start: LocalTime, end: LocalTime): List<LocalTime> {
-        if (!start.isBefore(end)) return emptyList()
-        val slots = mutableListOf<LocalTime>()
-        var current = start
-        while (!current.plusMinutes(60).isAfter(end)) {
-            slots += current
-            current = current.plusMinutes(60)
+    private fun generateSlots(
+        start: LocalTime,
+        end: LocalTime
+    ): List<LocalTime> {
+
+        if (!start.isBefore(end)) {
+            return emptyList()
         }
+
+        /*
+         * Every appointment is exactly 60 minutes.
+         *
+         * If the schedule starts at:
+         * 09:30
+         *
+         * We do NOT generate:
+         * 09:30
+         *
+         * because the booking API requires appointments to start
+         * on the hour.
+         *
+         * The first valid slot becomes:
+         * 10:00
+         */
+
+        var current =
+            if (
+                start.minute == 0 &&
+                start.second == 0 &&
+                start.nano == 0
+            ) {
+                start
+            } else {
+                start
+                    .plusMinutes(
+                        (60 - start.minute).toLong()
+                    )
+                    .withSecond(0)
+                    .withNano(0)
+            }
+
+        val slots =
+            mutableListOf<LocalTime>()
+
+        while (
+            !current
+                .plusMinutes(60)
+                .isAfter(end)
+        ) {
+
+            slots += current
+
+            current =
+                current.plusMinutes(60)
+        }
+
         return slots
     }
 
-    // تم التعديل: استخدام .isAfter(end) للتأكد من أن مدة الموعد (60 دقيقة) تقع بالكامل ضمن نهاية الشفت
+    private fun buildBookingKey(
+        doctorId: UUID,
+        appointmentAt: Instant
+    ): String =
+        "$doctorId:$appointmentAt"
+
     private fun isValidSlot(start: LocalTime, end: LocalTime, time: LocalTime): Boolean {
         return !time.isBefore(start) && !time.plusMinutes(60).isAfter(end)
     }

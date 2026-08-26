@@ -246,6 +246,54 @@ class ClinicAdminService(
         return MessageResponse("Doctor status successfully $status")
     }
 
+    fun deleteDoctor(
+        clinicEmail: String,
+        doctorUserId: UUID
+    ) {
+
+        val clinic =
+            getOrCreateClinic(clinicEmail)
+
+        val clinicUserId =
+            clinic.user!!.id!!
+
+        val clinicDoctorId =
+            ClinicDoctorId(
+                doctorUserId = doctorUserId,
+                clinicUserId = clinicUserId
+            )
+
+        if (
+            !clinicDoctorRepository
+                .existsById(clinicDoctorId)
+        ) {
+            throw ResourceNotFoundException(
+                "Doctor not found in your clinic catalog"
+            )
+        }
+
+        /*
+         * Remove only the relationship between the doctor
+         * and this clinic.
+         *
+         * We intentionally DO NOT delete the User.
+         *
+         * We intentionally DO NOT delete appointments.
+         *
+         * Therefore:
+         *
+         * - Old appointments remain.
+         * - Old reviews remain.
+         * - Doctor account remains.
+         * - Doctor is removed from this clinic.
+         * - New bookings for this clinic are blocked because
+         *   the clinic_doctors relationship no longer exists.
+         */
+        clinicDoctorRepository.deleteById(
+            clinicDoctorId
+        )
+    }
+
     // ── REUSABLE HELPERS ────────────────────────────────────────────────
 
     private fun getOrCreateClinic(userEmail: String): Clinic {
@@ -292,20 +340,4 @@ class ClinicAdminService(
         bio = this.bio,
         specialty = this.specialty
     )
-
-    fun deleteDoctor(clinicEmail: String, doctorUserId: UUID) {
-        val clinic = getOrCreateClinic(clinicEmail)
-        val clinicUserId = clinic.user!!.id!!
-
-        val clinicDoctorId = ClinicDoctorId(doctorUserId = doctorUserId, clinicUserId = clinicUserId)
-
-        if (!clinicDoctorRepository.existsById(clinicDoctorId)) {
-            throw ResourceNotFoundException("Doctor not found in your clinic catalog")
-        }
-
-        val doctor = userRepository.findById(doctorUserId)
-            .orElseThrow { ResourceNotFoundException("Doctor user not found") }
-        doctor.isActive = false
-        userRepository.save(doctor)
-    }
 }

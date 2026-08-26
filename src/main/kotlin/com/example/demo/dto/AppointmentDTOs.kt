@@ -1,5 +1,6 @@
 package com.example.demo.dto
 
+import com.example.demo.model.AppointmentStatus
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -15,7 +16,8 @@ data class AppointmentSummaryResponse(
     val serviceName: String,
     val scheduleId: Long?,
     val appointmentAt: OffsetDateTime,
-    val createdAt: OffsetDateTime
+    val createdAt: OffsetDateTime,
+    val status: AppointmentStatus
 )
 
 data class AppointmentListResponse(
