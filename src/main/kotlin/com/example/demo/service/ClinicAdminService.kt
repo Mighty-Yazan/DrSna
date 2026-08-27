@@ -42,6 +42,14 @@ class ClinicAdminService(
         clinic.checkingFee = request.checkingFee
         clinic.description = request.description?.trim()
 
+        if (clinic.user != null) {
+            clinic.user!!.fullName = request.clinicName.trim()
+            if (request.city != null) {
+                clinic.user!!.city = request.city
+            }
+            userRepository.save(clinic.user!!)
+        }
+
         val updatedClinic = clinicRepository.save(clinic)
         return updatedClinic.toResponse()
     }
@@ -126,6 +134,13 @@ class ClinicAdminService(
             )
         }
         return SpecialtyResponse(specialtyId, specialty.name)
+    }
+
+    @Transactional
+    fun removeSpecialty(userEmail: String, name: String) {
+        val clinic = getOrCreateClinic(userEmail)
+        val specialty = specialtyRepository.findByNameIgnoreCase(name.trim()) ?: return
+        clinicSpecialtyRepository.deleteByClinicIdAndSpecialtyId(clinic.id!!, specialty.id!!)
     }
 
     @Transactional(readOnly = true)
@@ -273,25 +288,17 @@ class ClinicAdminService(
         }
 
         /*
-         * Remove only the relationship between the doctor
-         * and this clinic.
-         *
-         * We intentionally DO NOT delete the User.
-         *
-         * We intentionally DO NOT delete appointments.
-         *
-         * Therefore:
-         *
-         * - Old appointments remain.
-         * - Old reviews remain.
-         * - Doctor account remains.
-         * - Doctor is removed from this clinic.
-         * - New bookings for this clinic are blocked because
-         *   the clinic_doctors relationship no longer exists.
+         * First, remove the relationship between the doctor and this clinic.
          */
         clinicDoctorRepository.deleteById(
             clinicDoctorId
         )
+        
+        /*
+         * Then delete the actual user record from the database, 
+         * as requested by the frontend team.
+         */
+        userRepository.deleteById(doctorUserId)
     }
 
     // ── REUSABLE HELPERS ────────────────────────────────────────────────
@@ -320,7 +327,8 @@ class ClinicAdminService(
         workingHours = this.workingHours,
         checkingFee = this.checkingFee,
         rating = this.rating,
-        description = this.description
+        description = this.description,
+        city = this.user?.city ?: throw IllegalStateException("Clinic missing linked user city")
     )
 
     private fun Services.toResponse() = ServicesResponse(

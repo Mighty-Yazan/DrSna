@@ -96,6 +96,15 @@ class ClinicAdminController(
     ): ResponseEntity<SpecialtyResponse> =
         ResponseEntity.status(HttpStatus.CREATED).body(clinicAdminService.addSpecialty(authentication.name, request))
 
+    @DeleteMapping("/specialties/{name}")
+    fun removeSpecialty(
+        authentication: Authentication,
+        @PathVariable name: String
+    ): ResponseEntity<Void> {
+        clinicAdminService.removeSpecialty(authentication.name, name)
+        return ResponseEntity.noContent().build()
+    }
+
     // ── DOCTORS ENDPOINTS ───────────────────────────────────────────────
 
     @GetMapping("/doctors")

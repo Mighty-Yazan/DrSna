@@ -31,7 +31,8 @@ data class ClinicProfileRequest(
     @field:DecimalMin(value = "0.0", inclusive = true, message = "Checking fee cannot be negative")
     val checkingFee: BigDecimal?,
 
-    val description: String?
+    val description: String?,
+    val city: City?
 )
 
 data class ClinicProfileResponse(
@@ -44,7 +45,8 @@ data class ClinicProfileResponse(
     val workingHours: String?,
     val checkingFee: BigDecimal?,
     val rating: BigDecimal,
-    val description: String?
+    val description: String?,
+    val city: City
 )
 
 // ── SERVICE DTOs ────────────────────────────────────────────────────

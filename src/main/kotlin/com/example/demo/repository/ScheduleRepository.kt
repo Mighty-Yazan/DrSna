@@ -18,4 +18,8 @@ interface ScheduleRepository : JpaRepository<Schedule, Long> {
     fun existsByClinicIdAndSpecificDateAndType(clinicId: UUID, specificDate: LocalDate, type: ScheduleType): Boolean
 
     fun findAllByClinicId(clinicId: UUID): List<Schedule>
+
+    fun deleteByClinicIdAndDoctor_IdAndTypeAndDayOfWeek(clinicId: UUID, doctorId: UUID, type: ScheduleType, dayOfWeek: DayOfWeek)
+
+    fun deleteByClinicIdAndTypeAndDayOfWeek(clinicId: UUID, type: ScheduleType, dayOfWeek: DayOfWeek)
 }

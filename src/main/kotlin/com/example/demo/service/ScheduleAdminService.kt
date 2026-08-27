@@ -46,6 +46,14 @@ class ScheduleAdminService(
         }
     }
 
+    @Transactional(readOnly = true)
+    fun getClinicHours(clinicEmail: String): List<ScheduleResponseDto> {
+        val clinic = getClinic(clinicEmail)
+        return scheduleRepository.findByClinicId(clinic.id!!)
+            .filter { it.type == ScheduleType.CLINIC_HOURS }
+            .map { it.toResponseDto() }
+    }
+
     @Transactional
     fun saveClinicHours(clinicEmail: String, request: SaveClinicHoursRequest): ScheduleResponseDto {
         validateTimes(request.startTime, request.endTime)
@@ -56,6 +64,16 @@ class ScheduleAdminService(
         schedule.startTime = request.startTime
         schedule.endTime = request.endTime
         return scheduleRepository.save(schedule).toResponseDto()
+    }
+
+    @Transactional
+    fun deleteClinicHoursDay(clinicEmail: String, dayOfWeek: java.time.DayOfWeek) {
+        val clinic = getClinic(clinicEmail)
+        scheduleRepository.deleteByClinicIdAndTypeAndDayOfWeek(
+            clinicId = clinic.id!!,
+            type = ScheduleType.CLINIC_HOURS,
+            dayOfWeek = dayOfWeek
+        )
     }
 
     @Transactional
@@ -75,6 +93,18 @@ class ScheduleAdminService(
         schedule.startTime = request.startTime
         schedule.endTime = request.endTime
         return scheduleRepository.save(schedule).toResponseDto()
+    }
+
+    @Transactional
+    fun deleteDoctorScheduleDay(clinicEmail: String, doctorIdStr: String, dayOfWeek: java.time.DayOfWeek) {
+        val clinic = getClinic(clinicEmail)
+        val doctorId = UUID.fromString(doctorIdStr)
+        scheduleRepository.deleteByClinicIdAndDoctor_IdAndTypeAndDayOfWeek(
+            clinicId = clinic.id!!,
+            doctorId = doctorId,
+            type = ScheduleType.DOCTOR_SHIFT,
+            dayOfWeek = dayOfWeek
+        )
     }
 
     @Transactional
@@ -120,6 +150,14 @@ class ScheduleAdminService(
         }.takeWhile { it.plusMinutes(60).let { endTime -> !endTime.isAfter(end) } }
             .filter { date.atTime(it).atZone(zoneId).toInstant() !in booked }
             .toList()
+    }
+
+    @Transactional(readOnly = true)
+    fun getDoctorSchedules(clinicEmail: String, doctorId: UUID): List<ScheduleResponseDto> {
+        val clinic = getClinic(clinicEmail)
+        return scheduleRepository.findByClinicId(clinic.id!!)
+            .filter { it.doctor?.id == doctorId && it.type == ScheduleType.DOCTOR_SHIFT }
+            .map { it.toResponseDto() }
     }
 
     private fun getClinic(email: String): Clinic = clinicRepository.findByUserEmail(email)

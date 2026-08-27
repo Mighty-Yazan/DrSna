@@ -21,13 +21,36 @@ class ScheduleAdminController(
     fun save(authentication: Authentication, @RequestBody request: SaveScheduleRequest): ResponseEntity<ScheduleResponseDto> =
         ResponseEntity.ok(scheduleAdminService.save(authentication.name, request))
 
+    @GetMapping("/clinic-hours")
+    fun getClinicHours(authentication: Authentication): ResponseEntity<List<ScheduleResponseDto>> =
+        ResponseEntity.ok(scheduleAdminService.getClinicHours(authentication.name))
+
     @PostMapping("/clinic-hours")
     fun saveClinicHours(authentication: Authentication, @RequestBody request: SaveClinicHoursRequest): ResponseEntity<ScheduleResponseDto> =
         ResponseEntity.ok(scheduleAdminService.saveClinicHours(authentication.name, request))
 
+    @DeleteMapping("/clinic-hours")
+    fun deleteClinicHours(
+        authentication: Authentication,
+        @RequestParam dayOfWeek: java.time.DayOfWeek
+    ): ResponseEntity<Void> {
+        scheduleAdminService.deleteClinicHoursDay(authentication.name, dayOfWeek)
+        return ResponseEntity.noContent().build()
+    }
+
     @PostMapping("/doctor-schedule")
     fun saveDoctorSchedule(authentication: Authentication, @RequestBody request: SaveDoctorScheduleRequest): ResponseEntity<ScheduleResponseDto> =
         ResponseEntity.ok(scheduleAdminService.saveDoctorSchedule(authentication.name, request))
+
+    @DeleteMapping("/doctor-schedule")
+    fun deleteDoctorSchedule(
+        authentication: Authentication,
+        @RequestParam doctorId: String,
+        @RequestParam dayOfWeek: java.time.DayOfWeek
+    ): ResponseEntity<Void> {
+        scheduleAdminService.deleteDoctorScheduleDay(authentication.name, doctorId, dayOfWeek)
+        return ResponseEntity.noContent().build()
+    }
 
     @PostMapping("/holidays")
     fun saveHoliday(authentication: Authentication, @RequestBody request: SaveHolidayRequest): ResponseEntity<ScheduleResponseDto> =
@@ -40,4 +63,11 @@ class ScheduleAdminController(
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) date: LocalDate
     ): ResponseEntity<List<LocalTime>> =
         ResponseEntity.ok(scheduleAdminService.getAvailableSlots(authentication.name, doctorId, date))
+
+    @GetMapping("/doctor-schedule/{doctorId}")
+    fun getDoctorSchedules(
+        authentication: Authentication,
+        @PathVariable doctorId: UUID
+    ): ResponseEntity<List<ScheduleResponseDto>> =
+        ResponseEntity.ok(scheduleAdminService.getDoctorSchedules(authentication.name, doctorId))
 }
