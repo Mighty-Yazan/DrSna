@@ -234,7 +234,8 @@ class AppointmentService(
     @Transactional(readOnly = true)
     fun getClinicAppointments(
         clinicEmail: String,
-        date: LocalDate?,
+        startDate: LocalDate?,
+        endDate: LocalDate?,
         doctorId: UUID?,
         status: AppointmentStatus? = null
     ): List<AppointmentSummaryResponse> {
@@ -251,17 +252,9 @@ class AppointmentService(
             clinic.user!!.id!!
 
         var appointments =
-            if (date != null) {
-
-                requireDateNotPast(date)
-
-                val from =
-                    date.atStartOfDay(zoneId).toInstant()
-
-                val to =
-                    date.plusDays(1)
-                        .atStartOfDay(zoneId)
-                        .toInstant()
+            if (startDate != null && endDate != null) {
+                val from = startDate.atStartOfDay(zoneId).toInstant()
+                val to = endDate.plusDays(1).atStartOfDay(zoneId).toInstant()
 
                 appointmentRepository
                     .findAllByClinicIdAndAppointmentDateBetween(
@@ -272,7 +265,19 @@ class AppointmentService(
                     .sortedBy {
                         it.appointmentDate
                     }
+            } else if (startDate != null) {
+                val from = startDate.atStartOfDay(zoneId).toInstant()
+                val to = startDate.plusDays(1).atStartOfDay(zoneId).toInstant()
 
+                appointmentRepository
+                    .findAllByClinicIdAndAppointmentDateBetween(
+                        clinicUserId,
+                        from,
+                        to
+                    )
+                    .sortedBy {
+                        it.appointmentDate
+                    }
             } else {
 
                 appointmentRepository
@@ -314,6 +319,78 @@ class AppointmentService(
         }
     }
 
+    @Transactional
+    fun createWalkInAppointment(
+        clinicEmail: String,
+        request: com.example.demo.dto.CreateWalkInAppointmentRequest
+    ): AppointmentSummaryResponse {
+
+        val clinic =
+            clinicRepository.findByUserEmail(clinicEmail)
+                .orElseThrow {
+                    ResourceNotFoundException(
+                        "Clinic profile not found for authenticated clinic"
+                    )
+                }
+
+        val clinicUserId = clinic.user!!.id!!
+        val doctorId = request.doctorId ?: throw AppException("Doctor ID is required")
+        val date = request.appointmentDate ?: throw AppException("Appointment date is required")
+        val time = request.appointmentTime ?: throw AppException("Appointment time is required")
+
+        if (
+            !clinicDoctorRepository
+                .existsByClinic_IdAndDoctor_Id(
+                    clinicUserId,
+                    doctorId
+                )
+        ) {
+            throw ResourceNotFoundException(
+                "Doctor is not associated with this clinic"
+            )
+        }
+
+        val doctorUser = userRepository.findById(doctorId).orElseThrow {
+            ResourceNotFoundException("Doctor not found")
+        }
+
+        val appointment = Appointment(
+            clinic = clinic.user!!,
+            doctor = doctorUser,
+            patient = null,
+            service = null,
+            schedule = null,
+            appointmentDate = date.atTime(time).atZone(zoneId).toInstant(),
+            status = AppointmentStatus.CONFIRMED, // Walk-in is automatically confirmed
+            bookingKey = null
+        )
+
+        validateAppointmentSlot(appointment, date, time)
+
+        val newInstant = appointment.appointmentDate!!
+        val newBookingKey = buildBookingKey(doctorUser.id!!, newInstant)
+
+        if (appointmentRepository.existsByBookingKey(newBookingKey)) {
+            throw DuplicateResourceException("The selected appointment slot is already booked")
+        }
+
+        appointment.bookingKey = newBookingKey
+
+        return saveSafely(appointment).toSummary()
+    }
+
+    @Transactional
+    fun deleteWalkInAppointment(
+        clinicEmail: String,
+        appointmentId: UUID
+    ): MessageResponse {
+        val appointment = findClinicAppointment(clinicEmail, appointmentId)
+
+        appointmentRepository.delete(appointment)
+
+        return MessageResponse("Appointment deleted successfully")
+    }
+
     // ============================================================
     // GENERIC APPOINTMENT LIST
     // ============================================================
@@ -333,6 +410,7 @@ class AppointmentService(
                 getClinicAppointments(
                     email,
                     date,
+                    null, // endDate
                     doctorId,
                     status
                 )
@@ -822,40 +900,19 @@ class AppointmentService(
             )
         }
 
-        val clinicSchedule =
-            scheduleRepository
-                .findByClinicIdAndTypeAndDayOfWeek(
-                    clinicId,
-                    ScheduleType.CLINIC_HOURS,
-                    date.dayOfWeek
-                )
-                ?: throw AppException(
-                    "Clinic is closed on this day"
-                )
-
         val doctorSchedule =
             schedules.firstOrNull {
                 it.doctor?.id == doctorId &&
                         it.type ==
                         ScheduleType.DOCTOR_SHIFT &&
-                        it.dayOfWeek ==
-                        date.dayOfWeek
+                        it.specificDate == date
             }
                 ?: throw AppException(
                     "Doctor is not scheduled to work on this day"
                 )
 
-        val start =
-            maxOf(
-                clinicSchedule.startTime!!,
-                doctorSchedule.startTime!!
-            )
-
-        val end =
-            minOf(
-                clinicSchedule.endTime!!,
-                doctorSchedule.endTime!!
-            )
+        val start = doctorSchedule.startTime!!
+        val end = doctorSchedule.endTime!!
 
         if (
             !isValidSlot(
@@ -913,12 +970,15 @@ class AppointmentService(
                 .saveAndFlush(appointment)
 
         } catch (
-            _: DataIntegrityViolationException
+            e: DataIntegrityViolationException
         ) {
-
-            throw DuplicateResourceException(
-                "The selected appointment slot is already booked"
-            )
+            val msg = e.mostSpecificCause.message ?: e.message ?: ""
+            if (msg.contains("booking_key", ignoreCase = true)) {
+                throw DuplicateResourceException(
+                    "The selected appointment slot is already booked"
+                )
+            }
+            throw AppException("Failed to save appointment: $msg")
         }
     }
 
@@ -985,16 +1045,16 @@ class AppointmentService(
                 doctor!!.fullName,
 
             patientId =
-                patient!!.id!!,
+                patient?.id,
 
             patientName =
-                patient!!.fullName,
+                patient?.fullName,
 
             serviceId =
-                service!!.id!!,
+                service?.id,
 
             serviceName =
-                service!!.serviceName,
+                service?.serviceName,
 
             scheduleId =
                 schedule?.id,

@@ -59,4 +59,5 @@ interface AppointmentRepository : JpaRepository<Appointment, UUID> {
         clinicId: UUID,
         from: Instant
     ): List<Appointment>
+    fun deleteAllByDoctor_Id(doctorId: UUID)
 }

@@ -77,16 +77,29 @@ class PatientService(
 
         val doctors = clinicDoctorRepository.findAllByClinic_Id(clinic.user!!.id!!)
             .filter { it.doctor?.isActive == true }
+            .filter { relation ->
+                allClinicSchedules.any { 
+                    it.doctor?.id == relation.doctor?.id && 
+                    it.type == ScheduleType.DOCTOR_SHIFT &&
+                    it.specificDate != null && 
+                    !it.specificDate!!.isBefore(LocalDate.now(zoneId))
+                }
+            }
             .mapNotNull { relation ->
                 val doctor = relation.doctor ?: return@mapNotNull null
 
                 val schedules = allClinicSchedules
-                    .filter { it.doctor?.id == doctor.id }
-                    .sortedWith(compareBy<Schedule> { it.dayOfWeek?.value ?: 0 }.thenBy { it.startTime })
+                    .filter { it.doctor?.id == doctor.id && it.type == ScheduleType.DOCTOR_SHIFT }
+                    .sortedWith(compareBy<Schedule> { it.specificDate }.thenBy { it.startTime })
                     .map { it.toResponse() }
 
                 DoctorDetailsResponse(doctor.id!!, doctor.fullName, doctor.email, doctor.specialty, doctor.bio, doctor.isActive, schedules)
             }
+
+        val clinicHoursList = allClinicSchedules
+            .filter { it.type == ScheduleType.CLINIC_HOURS && it.dayOfWeek != null }
+            .sortedBy { it.dayOfWeek?.value ?: 0 }
+            .map { it.toResponse() }
 
         return ClinicDetailsResponse(
             clinicId = clinic.id!!,
@@ -96,10 +109,12 @@ class PatientService(
             rating = clinic.rating,
             detailedAddress = clinic.detailedAddress,
             phoneNumber = clinic.phoneNumber,
+            email = clinic.user!!.email,
             socialLinks = clinic.socialLinks,
             checkingFee = clinic.checkingFee,
             description = clinic.description,
             workingHours = clinic.workingHours,
+            clinicHours = clinicHoursList,
             services = services,
             specialties = specialties,
             doctors = doctors,
@@ -123,9 +138,6 @@ class PatientService(
         val isClinicHoliday = scheduleRepository.existsByClinicIdAndSpecificDateAndType(clinicId, date, ScheduleType.HOLIDAY)
         if (isClinicHoliday) return emptyList()
 
-        val clinicSchedule = scheduleRepository.findByClinicIdAndTypeAndDayOfWeek(clinicId, ScheduleType.CLINIC_HOURS, date.dayOfWeek)
-            ?: return emptyList()
-
         val allSchedules = scheduleRepository.findByClinicId(clinicId)
         val now = Instant.now()
 
@@ -139,11 +151,11 @@ class PatientService(
             if (isDoctorHoliday) return@flatMap emptyList()
 
             val doctorSchedule = allSchedules.firstOrNull {
-                it.doctor?.id == doctor.id && it.type == ScheduleType.DOCTOR_SHIFT && it.dayOfWeek == date.dayOfWeek
+                it.doctor?.id == doctor.id && it.type == ScheduleType.DOCTOR_SHIFT && it.specificDate == date
             } ?: return@flatMap emptyList()
 
-            val startShift = maxOf(clinicSchedule.startTime!!, doctorSchedule.startTime!!)
-            val endShift = minOf(clinicSchedule.endTime!!, doctorSchedule.endTime!!)
+            val startShift = doctorSchedule.startTime!!
+            val endShift = doctorSchedule.endTime!!
             if (startShift >= endShift) return@flatMap emptyList()
 
             val from = date.atStartOfDay(zoneId).toInstant()
@@ -158,7 +170,7 @@ class PatientService(
                 val instant = appointmentAt.toInstant()
                 if (instant.isBefore(now)) return@mapNotNull null
                 AvailabilitySlotResponse(
-                    scheduleId = doctorSchedule.id,
+                    scheduleId = doctorSchedule?.id,
                     doctorId = doctor.id!!,
                     doctorName = doctor.fullName,
                     date = date,
@@ -237,15 +249,12 @@ class PatientService(
             throw AppException("The clinic or doctor is not available on this date due to a holiday/closure")
         }
 
-        val clinicSchedule = scheduleRepository.findByClinicIdAndTypeAndDayOfWeek(clinicId, ScheduleType.CLINIC_HOURS, date.dayOfWeek)
-            ?: throw AppException("Clinic is closed on this day")
-
         val doctorSchedule = scheduleRepository.findByClinicId(clinicId).firstOrNull {
-            it.doctor?.id == doctorId && it.type == ScheduleType.DOCTOR_SHIFT && it.dayOfWeek == date.dayOfWeek
-        } ?: throw AppException("Doctor is not scheduled to work on this day")
+            it.doctor?.id == doctorId && it.type == ScheduleType.DOCTOR_SHIFT && it.specificDate == date
+        } ?: throw AppException("Doctor is not scheduled on this day")
 
-        val startShift = maxOf(clinicSchedule.startTime!!, doctorSchedule.startTime!!)
-        val endShift = minOf(clinicSchedule.endTime!!, doctorSchedule.endTime!!)
+        val startShift = doctorSchedule.startTime!!
+        val endShift = doctorSchedule.endTime!!
 
         if (!isValidSlot(startShift, endShift, time)) {
             throw AppException("Selected time is outside the doctor's available working hours")
@@ -346,9 +355,6 @@ class PatientService(
         val isClinicHoliday = scheduleRepository.existsByClinicIdAndSpecificDateAndType(clinicId, date, ScheduleType.HOLIDAY)
         if (isClinicHoliday) return false
 
-        val clinicSchedule = scheduleRepository.findByClinicIdAndTypeAndDayOfWeek(clinicId, ScheduleType.CLINIC_HOURS, date.dayOfWeek)
-            ?: return false
-
         val relations = clinicDoctorRepository.findAllByClinic_Id(clinicUser.id!!)
         val from = date.atStartOfDay(zoneId).toInstant()
         val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
@@ -365,11 +371,11 @@ class PatientService(
             if (isDoctorHoliday) return@any false
 
             val doctorSchedule = allSchedules.firstOrNull {
-                it.doctor?.id == doctor.id && it.type == ScheduleType.DOCTOR_SHIFT && it.dayOfWeek == date.dayOfWeek
+                it.doctor?.id == doctor.id && it.type == ScheduleType.DOCTOR_SHIFT && it.specificDate == date
             } ?: return@any false
 
-            val start = maxOf(clinicSchedule.startTime!!, doctorSchedule.startTime!!)
-            val end = minOf(clinicSchedule.endTime!!, doctorSchedule.endTime!!)
+            val start = doctorSchedule.startTime!!
+            val end = doctorSchedule.endTime!!
             if (start >= end) return@any false
 
             val booked = appointmentRepository.findAllByDoctorIdAndAppointmentDateBetween(doctor.id!!, from, to)
@@ -458,19 +464,64 @@ class PatientService(
         }
     }
 
-    private fun Clinic.toSummary(available: Boolean?) = ClinicSummaryResponse(
-        clinicId = id!!,
-        clinicUserId = user!!.id!!,
-        clinicName = clinicName,
-        city = user!!.city,
-        rating = rating,
-        detailedAddress = detailedAddress,
-        phoneNumber = phoneNumber,
-        checkingFee = checkingFee,
-        workingHours = workingHours,
-        services = servicesRepository.findAllByClinicId(id!!).map { it.serviceName },
-        available = available
-    )
+    private fun getNextAvailableSlot(clinicId: UUID): String? {
+        val today = LocalDate.now(zoneId)
+        for (i in 0..14L) {
+            val date = today.plusDays(i)
+            val slots = getAvailability(clinicId, date, null)
+            if (slots.isNotEmpty()) {
+                val earliest = slots.minByOrNull { it.time } ?: continue
+                val dateStr = when (i) {
+                    0L -> "Today"
+                    1L -> "Tomorrow"
+                    else -> date.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
+                }
+                return "$dateStr, ${earliest.time}"
+            }
+        }
+        return null
+    }
+
+    private fun Clinic.toSummary(available: Boolean?): ClinicSummaryResponse {
+        val today = LocalDate.now(zoneId).dayOfWeek
+        val allSchedules = scheduleRepository.findAllByClinicId(id!!)
+        val schedule = allSchedules.firstOrNull { it.type == ScheduleType.CLINIC_HOURS && it.dayOfWeek == today }
+        
+        val dynamicWorkingHours = if (schedule?.startTime != null && schedule.endTime != null) {
+            "${schedule.startTime} - ${schedule.endTime}"
+        } else {
+            val hasClinicHours = allSchedules.any { it.type == ScheduleType.CLINIC_HOURS }
+            if (hasClinicHours) "Closed Today" else workingHours
+        }
+
+        return ClinicSummaryResponse(
+            clinicId = id!!,
+            clinicUserId = user!!.id!!,
+            clinicName = clinicName,
+            city = user!!.city,
+            rating = rating,
+            detailedAddress = detailedAddress,
+            phoneNumber = phoneNumber,
+            checkingFee = checkingFee,
+            description = description,
+            workingHours = dynamicWorkingHours,
+            services = servicesRepository.findAllByClinicId(id!!).map { it.serviceName },
+            specialties = clinicSpecialtyRepository.findAllByClinicId(id!!).mapNotNull { it.specialty?.name },
+            doctors = clinicDoctorRepository.findAllByClinic_Id(user!!.id!!)
+                .filter { it.doctor?.isActive == true }
+                .filter { relation -> 
+                    allSchedules.any { 
+                        it.doctor?.id == relation.doctor?.id && 
+                        it.type == ScheduleType.DOCTOR_SHIFT && 
+                        it.specificDate != null && 
+                        !it.specificDate!!.isBefore(LocalDate.now(zoneId))
+                    }
+                }
+                .map { it.doctor!!.fullName },
+            available = available,
+            nextAvailableSlot = getNextAvailableSlot(id!!)
+        )
+    }
 
     private fun Schedule.toResponse() = ScheduleResponse(
         scheduleId = id,

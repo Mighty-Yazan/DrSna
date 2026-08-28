@@ -46,9 +46,9 @@ class ScheduleAdminController(
     fun deleteDoctorSchedule(
         authentication: Authentication,
         @RequestParam doctorId: String,
-        @RequestParam dayOfWeek: java.time.DayOfWeek
+        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) specificDate: LocalDate
     ): ResponseEntity<Void> {
-        scheduleAdminService.deleteDoctorScheduleDay(authentication.name, doctorId, dayOfWeek)
+        scheduleAdminService.deleteDoctorScheduleDate(authentication.name, doctorId, specificDate)
         return ResponseEntity.noContent().build()
     }
 

@@ -24,7 +24,7 @@ data class SaveClinicHoursRequest(
 
 data class SaveDoctorScheduleRequest(
     val doctorId: String,
-    val dayOfWeek: DayOfWeek,
+    val specificDate: LocalDate,
     val startTime: LocalTime,
     val endTime: LocalTime
 )

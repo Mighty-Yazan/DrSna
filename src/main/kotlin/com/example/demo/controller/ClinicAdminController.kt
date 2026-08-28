@@ -136,7 +136,7 @@ class ClinicAdminController(
     fun toggleDoctorStatus(
         authentication: Authentication,
         @PathVariable doctorId: UUID
-    ): ResponseEntity<MessageResponse> {
+    ): ResponseEntity<DoctorResponse> {
         val response = clinicAdminService.toggleDoctorStatus(authentication.name, doctorId)
         return ResponseEntity.ok(response)
     }

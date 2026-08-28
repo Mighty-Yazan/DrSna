@@ -33,10 +33,10 @@ class ScheduleAdminService(
             }
             ScheduleType.DOCTOR_SHIFT -> {
                 val doctorId = request.doctorId ?: throw AppException("doctorId is required")
-                val day = request.dayOfWeek ?: throw AppException("dayOfWeek is required")
+                val date = request.specificDate ?: throw AppException("specificDate is required")
                 val start = request.startTime ?: throw AppException("startTime is required")
                 val end = request.endTime ?: throw AppException("endTime is required")
-                saveDoctorSchedule(clinicEmail, SaveDoctorScheduleRequest(doctorId, day, start, end))
+                saveDoctorSchedule(clinicEmail, SaveDoctorScheduleRequest(doctorId, date, start, end))
             }
             ScheduleType.HOLIDAY -> {
                 val date = request.specificDate ?: throw AppException("specificDate is required")
@@ -87,23 +87,24 @@ class ScheduleAdminService(
         if (relation.doctor?.isActive != true) throw AppException("Cannot create a schedule for an inactive doctor")
 
         val schedule = scheduleRepository.findByClinicId(clinic.id!!)
-            .firstOrNull { it.doctor?.id == doctorId && it.type == ScheduleType.DOCTOR_SHIFT && it.dayOfWeek == request.dayOfWeek }
+            .firstOrNull { it.doctor?.id == doctorId && it.type == ScheduleType.DOCTOR_SHIFT && it.specificDate == request.specificDate }
             ?: Schedule(type = ScheduleType.DOCTOR_SHIFT, clinic = clinic, doctor = relation.doctor)
-        schedule.dayOfWeek = request.dayOfWeek
+        schedule.dayOfWeek = null
+        schedule.specificDate = request.specificDate
         schedule.startTime = request.startTime
         schedule.endTime = request.endTime
         return scheduleRepository.save(schedule).toResponseDto()
     }
 
     @Transactional
-    fun deleteDoctorScheduleDay(clinicEmail: String, doctorIdStr: String, dayOfWeek: java.time.DayOfWeek) {
+    fun deleteDoctorScheduleDate(clinicEmail: String, doctorIdStr: String, specificDate: LocalDate) {
         val clinic = getClinic(clinicEmail)
         val doctorId = UUID.fromString(doctorIdStr)
-        scheduleRepository.deleteByClinicIdAndDoctor_IdAndTypeAndDayOfWeek(
+        scheduleRepository.deleteByClinicIdAndDoctor_IdAndTypeAndSpecificDate(
             clinicId = clinic.id!!,
             doctorId = doctorId,
             type = ScheduleType.DOCTOR_SHIFT,
-            dayOfWeek = dayOfWeek
+            specificDate = specificDate
         )
     }
 

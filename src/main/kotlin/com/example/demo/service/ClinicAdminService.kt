@@ -21,7 +21,9 @@ class ClinicAdminService(
     private val passwordEncoder: PasswordEncoder,
     private val specialtyRepository: SpecialtyRepository,
     private val clinicSpecialtyRepository: ClinicSpecialtyRepository,
-    private val reviewRepository: ReviewRepository
+    private val reviewRepository: ReviewRepository,
+    private val appointmentRepository: AppointmentRepository,
+    private val scheduleRepository: ScheduleRepository
 ) {
     // ── CLINIC PROFILE ──────────────────────────────────────────────────
 
@@ -243,7 +245,7 @@ class ClinicAdminService(
     }
 
     @Transactional
-    fun toggleDoctorStatus(clinicEmail: String, doctorUserId: UUID): MessageResponse {
+    fun toggleDoctorStatus(clinicEmail: String, doctorUserId: UUID): DoctorResponse {
         val clinic = getOrCreateClinic(clinicEmail)
         val clinicUserId = clinic.user!!.id!!
 
@@ -255,10 +257,9 @@ class ClinicAdminService(
             .orElseThrow { ResourceNotFoundException("Doctor user not found with ID: $doctorUserId") }
 
         doctorUser.isActive = !doctorUser.isActive
-        userRepository.save(doctorUser)
+        val saved = userRepository.save(doctorUser)
 
-        val status = if (doctorUser.isActive) "activated" else "deactivated"
-        return MessageResponse("Doctor status successfully $status")
+        return saved.toDoctorResponse()
     }
 
     fun deleteDoctor(
@@ -294,6 +295,12 @@ class ClinicAdminService(
             clinicDoctorId
         )
         
+        /*
+         * Delete all appointments and schedules associated with the doctor
+         */
+        appointmentRepository.deleteAllByDoctor_Id(doctorUserId)
+        scheduleRepository.deleteAllByDoctor_Id(doctorUserId)
+
         /*
          * Then delete the actual user record from the database, 
          * as requested by the frontend team.

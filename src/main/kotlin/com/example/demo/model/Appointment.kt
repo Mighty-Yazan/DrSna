@@ -29,7 +29,7 @@ class Appointment(
     var doctor: User? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "patient_user_id", nullable = false)
+    @JoinColumn(name = "patient_user_id", nullable = true)
     var patient: User? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)

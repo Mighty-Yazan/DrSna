@@ -119,6 +119,48 @@ class AppointmentController(
     // CLINIC APPOINTMENTS
     // ============================================================
 
+    @PostMapping("/api/clinic/appointments")
+    @PreAuthorize("hasRole('CLINIC')")
+    fun createWalkInAppointment(
+        authentication: Authentication,
+        @Valid
+        @RequestBody
+        request: com.example.demo.dto.CreateWalkInAppointmentRequest
+    ): ResponseEntity<AppointmentSummaryResponse> {
+
+        val username = authentication.name
+            ?: throw IllegalStateException(
+                "Authenticated username was not found"
+            )
+
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(
+            appointmentService.createWalkInAppointment(
+                username,
+                request
+            )
+        )
+    }
+
+    @DeleteMapping("/api/clinic/appointments/{appointmentId}")
+    @PreAuthorize("hasRole('CLINIC')")
+    fun deleteWalkInAppointment(
+        authentication: Authentication,
+        @PathVariable appointmentId: UUID
+    ): ResponseEntity<MessageResponse> {
+
+        val username = authentication.name
+            ?: throw IllegalStateException(
+                "Authenticated username was not found"
+            )
+
+        return ResponseEntity.ok(
+            appointmentService.deleteWalkInAppointment(
+                username,
+                appointmentId
+            )
+        )
+    }
+
     @GetMapping("/api/clinic/appointments")
     @PreAuthorize("hasRole('CLINIC')")
     fun clinicAppointments(
@@ -126,7 +168,11 @@ class AppointmentController(
 
         @RequestParam(required = false)
         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-        date: LocalDate?,
+        startDate: LocalDate?,
+
+        @RequestParam(required = false)
+        @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+        endDate: LocalDate?,
 
         @RequestParam(required = false)
         doctorId: UUID?,
@@ -143,7 +189,8 @@ class AppointmentController(
         return ResponseEntity.ok(
             appointmentService.getClinicAppointments(
                 username,
-                date,
+                startDate,
+                endDate,
                 doctorId,
                 status
             )

@@ -22,10 +22,13 @@ data class ClinicSummaryResponse(
     val detailedAddress: String?,
     val phoneNumber: String?,
     val checkingFee: BigDecimal?,
+    val description: String?,
     val workingHours: String?,
     val services: List<String>,
     val specialties: List<String> = emptyList(),
-    val available: Boolean? = null
+    val doctors: List<String> = emptyList(),
+    val available: Boolean? = null,
+    val nextAvailableSlot: String? = null
 )
 
 data class ClinicDetailsResponse(
@@ -36,10 +39,12 @@ data class ClinicDetailsResponse(
     val rating: BigDecimal,
     val detailedAddress: String?,
     val phoneNumber: String?,
+    val email: String?,
     val socialLinks: String?,
     val checkingFee: BigDecimal?,
     val description: String?,
     val workingHours: String?,
+    val clinicHours: List<ScheduleResponse> = emptyList(),
     val services: List<ServiceDetailsResponse>,
     val specialties: List<String> = emptyList(),
     val doctors: List<DoctorDetailsResponse>,

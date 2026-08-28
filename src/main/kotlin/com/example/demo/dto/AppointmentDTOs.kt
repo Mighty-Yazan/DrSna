@@ -10,10 +10,10 @@ data class AppointmentSummaryResponse(
     val clinicName: String,
     val doctorId: UUID,
     val doctorName: String,
-    val patientId: UUID,
-    val patientName: String,
-    val serviceId: UUID,
-    val serviceName: String,
+    val patientId: UUID?,
+    val patientName: String?,
+    val serviceId: UUID?,
+    val serviceName: String?,
     val scheduleId: Long?,
     val appointmentAt: OffsetDateTime,
     val createdAt: OffsetDateTime,
@@ -24,4 +24,9 @@ data class AppointmentListResponse(
     val scope: String,
     val count: Int,
     val appointments: List<AppointmentSummaryResponse>
+)
+data class CreateWalkInAppointmentRequest(
+    val doctorId: UUID?,
+    val appointmentDate: java.time.LocalDate?,
+    val appointmentTime: java.time.LocalTime?
 )
