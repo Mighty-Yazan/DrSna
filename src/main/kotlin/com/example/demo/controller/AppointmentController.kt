@@ -2,6 +2,8 @@ package com.example.demo.controller
 
 import com.example.demo.dto.AppointmentListResponse
 import com.example.demo.dto.AppointmentSummaryResponse
+import com.example.demo.dto.BookAppointmentRequest
+import com.example.demo.dto.BookAppointmentResponse
 import com.example.demo.dto.MessageResponse
 import com.example.demo.dto.RescheduleAppointmentRequest
 import com.example.demo.dto.UpdateAppointmentStatusRequest
@@ -9,6 +11,7 @@ import com.example.demo.model.AppointmentStatus
 import com.example.demo.service.AppointmentService
 import jakarta.validation.Valid
 import org.springframework.format.annotation.DateTimeFormat
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.Authentication
@@ -308,5 +311,23 @@ class AppointmentController(
                 request
             )
         )
+    }
+
+    // ============================================================
+    // DOHA — PUBLIC APPOINTMENT FORM BOOKING
+    // POST /api/appointments/book
+    // No authentication required — open to all users from the frontend form
+    // ============================================================
+
+    @PostMapping("/api/appointments/book")
+    fun bookAppointment(
+        authentication: Authentication?,
+        @Valid
+        @RequestBody
+        request: BookAppointmentRequest
+    ): ResponseEntity<BookAppointmentResponse> {
+
+        val response = appointmentService.bookAppointment(authentication, request)
+        return ResponseEntity.status(HttpStatus.CREATED).body(response)
     }
 }

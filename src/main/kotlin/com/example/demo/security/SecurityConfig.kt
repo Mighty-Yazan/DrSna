@@ -47,7 +47,8 @@ class SecurityConfig(
                         "/api/health",
                         "/api/auth/register/user",
                         "/api/auth/register/clinic",
-                        "/api/auth/login"
+                        "/api/auth/login",
+                        "/api/appointments/book"   // DOHA: public appointment form — no auth required
                     ).permitAll()
                     .anyRequest().authenticated()
             }
