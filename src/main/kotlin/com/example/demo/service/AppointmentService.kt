@@ -2,6 +2,8 @@ package com.example.demo.service
 
 import com.example.demo.dto.AppointmentListResponse
 import com.example.demo.dto.AppointmentSummaryResponse
+import com.example.demo.dto.BookAppointmentRequest
+import com.example.demo.dto.BookAppointmentResponse
 import com.example.demo.dto.MessageResponse
 import com.example.demo.dto.RescheduleAppointmentRequest
 import com.example.demo.dto.UpdateAppointmentStatusRequest
@@ -15,6 +17,7 @@ import com.example.demo.repository.AppointmentRepository
 import com.example.demo.repository.ClinicDoctorRepository
 import com.example.demo.repository.ClinicRepository
 import com.example.demo.repository.ScheduleRepository
+import com.example.demo.repository.ServicesRepository
 import com.example.demo.repository.UserRepository
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
@@ -31,10 +34,73 @@ class AppointmentService(
     private val userRepository: UserRepository,
     private val clinicRepository: ClinicRepository,
     private val clinicDoctorRepository: ClinicDoctorRepository,
-    private val scheduleRepository: ScheduleRepository
+    private val scheduleRepository: ScheduleRepository,
+    private val servicesRepository: ServicesRepository
 ) {
 
     private val zoneId = ZoneId.of("Asia/Amman")
+
+    // ============================================================
+    // DOHA — APPOINTMENT FORM BOOKING
+    // POST /api/appointments/book
+    // ============================================================
+
+    /**
+     * Receives booking data from the Frontend Appointment Form and saves it.
+     * Fields: patientName, patientAge, serviceId, appointmentAt, paymentMethod.
+     * Returns a confirmation response with the generated appointmentId.
+     */
+    @Transactional
+    fun bookAppointment(request: BookAppointmentRequest): BookAppointmentResponse {
+
+        // 1. Validate that the appointmentAt is not in the past
+        val appointmentInstant = request.appointmentAt
+            .atZone(zoneId)
+            .toInstant()
+
+        if (!appointmentInstant.isAfter(Instant.now())) {
+            throw AppException("Appointment date and time must be in the future")
+        }
+
+        // 2. Look up the service to get its name and link the appointment
+        val service = servicesRepository.findById(request.serviceId)
+            .orElseThrow {
+                ResourceNotFoundException(
+                    "Service with ID '${request.serviceId}' was not found"
+                )
+            }
+
+        // 3. Build and save the Appointment entity
+        val appointment = Appointment(
+            // clinic and doctor are optional for a form-based booking (no auth required)
+            formPatientName = request.patientName,
+            formPatientAge  = request.patientAge,
+            service         = service,
+            appointmentDate = appointmentInstant,
+            paymentMethod   = request.paymentMethod,
+            status          = AppointmentStatus.PENDING
+        )
+
+        val saved = try {
+            appointmentRepository.saveAndFlush(appointment)
+        } catch (e: Exception) {
+            throw AppException("Failed to save appointment: ${e.message}")
+        }
+
+        // 4. Return the confirmation response
+        return BookAppointmentResponse(
+            appointmentId  = saved.id!!,
+            message        = "Appointment Created Successfully",
+            patientName    = request.patientName,
+            patientAge     = request.patientAge,
+            serviceName    = service.serviceName,
+            appointmentAt  = request.appointmentAt
+                .atZone(zoneId)
+                .toOffsetDateTime(),
+            paymentMethod  = request.paymentMethod,
+            status         = saved.status
+        )
+    }
 
     // ============================================================
     // PATIENT

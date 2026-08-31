@@ -21,11 +21,11 @@ class Appointment(
     var id: UUID? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "clinic_user_id", nullable = false)
+    @JoinColumn(name = "clinic_user_id", nullable = true)
     var clinic: User? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "doctor_user_id", nullable = false)
+    @JoinColumn(name = "doctor_user_id", nullable = true)
     var doctor: User? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -60,6 +60,23 @@ class Appointment(
      */
     @Column(name = "booking_key", unique = true, length = 100)
     var bookingKey: String? = null,
+
+    /*
+     * Payment method selected by the patient on the booking form.
+     * E.g. "CASH", "INSURANCE", "CREDIT_CARD"
+     */
+    @Column(name = "payment_method", length = 50)
+    var paymentMethod: String? = null,
+
+    /*
+     * Patient details captured directly from the booking form
+     * (used when the patient submits without a registered account).
+     */
+    @Column(name = "form_patient_name", length = 150)
+    var formPatientName: String? = null,
+
+    @Column(name = "form_patient_age")
+    var formPatientAge: Int? = null,
 
     @Column(name = "created_at", nullable = false, updatable = false)
     val createdAt: Instant = Instant.now()
