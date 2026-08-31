@@ -48,6 +48,12 @@ data class CreateWalkInAppointmentRequest(
  */
 data class BookAppointmentRequest(
 
+    @field:NotNull(message = "Clinic ID is required")
+    val clinicId: UUID,
+
+    @field:NotNull(message = "Doctor ID is required")
+    val doctorId: UUID,
+
     @field:NotBlank(message = "Patient name is required")
     @field:Size(max = 150, message = "Patient name must not exceed 150 characters")
     val patientName: String,

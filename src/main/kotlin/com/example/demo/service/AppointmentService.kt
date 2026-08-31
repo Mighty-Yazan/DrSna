@@ -12,12 +12,13 @@ import com.example.demo.exception.DuplicateResourceException
 import com.example.demo.exception.ResourceNotFoundException
 import com.example.demo.model.Appointment
 import com.example.demo.model.AppointmentStatus
+import com.example.demo.model.Schedule
 import com.example.demo.model.ScheduleType
 import com.example.demo.repository.AppointmentRepository
 import com.example.demo.repository.ClinicDoctorRepository
 import com.example.demo.repository.ClinicRepository
 import com.example.demo.repository.ScheduleRepository
-import com.example.demo.repository.ServicesRepository
+import com.example.demo.repository.SpecialtyRepository
 import com.example.demo.repository.UserRepository
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
@@ -35,7 +36,7 @@ class AppointmentService(
     private val clinicRepository: ClinicRepository,
     private val clinicDoctorRepository: ClinicDoctorRepository,
     private val scheduleRepository: ScheduleRepository,
-    private val servicesRepository: ServicesRepository
+    private val specialtyRepository: SpecialtyRepository
 ) {
 
     private val zoneId = ZoneId.of("Asia/Amman")
@@ -51,7 +52,10 @@ class AppointmentService(
      * Returns a confirmation response with the generated appointmentId.
      */
     @Transactional
-    fun bookAppointment(request: BookAppointmentRequest): BookAppointmentResponse {
+    fun bookAppointment(authentication: org.springframework.security.core.Authentication?, request: BookAppointmentRequest): BookAppointmentResponse {
+
+        val date = request.appointmentAt.toLocalDate()
+        val time = request.appointmentAt.toLocalTime()
 
         // 1. Validate that the appointmentAt is not in the past
         val appointmentInstant = request.appointmentAt
@@ -62,24 +66,41 @@ class AppointmentService(
             throw AppException("Appointment date and time must be in the future")
         }
 
-        // 2. Look up the service to get its name and link the appointment
-        val service = servicesRepository.findById(request.serviceId)
+        // 2. Fetch dependencies
+        val clinicEntity = clinicRepository.findById(request.clinicId)
+            .orElseThrow { ResourceNotFoundException("Clinic with ID '${request.clinicId}' was not found") }
+        val clinicUser = clinicEntity.user!!
+
+        val doctorUser = userRepository.findById(request.doctorId)
+            .orElseThrow { ResourceNotFoundException("Doctor with ID '${request.doctorId}' was not found") }
+
+        val specialty = specialtyRepository.findById(request.serviceId)
             .orElseThrow {
                 ResourceNotFoundException(
-                    "Service with ID '${request.serviceId}' was not found"
+                    "Specialty with ID '${request.serviceId}' was not found"
                 )
             }
 
-        // 3. Build and save the Appointment entity
+        val patientUser = authentication?.name?.let { email ->
+            userRepository.findByEmail(email).orElse(null)
+        }
+
+        // 3. Build the Appointment entity
         val appointment = Appointment(
-            // clinic and doctor are optional for a form-based booking (no auth required)
+            clinic          = clinicUser,
+            doctor          = doctorUser,
+            patient         = patientUser,
             formPatientName = request.patientName,
             formPatientAge  = request.patientAge,
-            service         = service,
+            specialty       = specialty,
             appointmentDate = appointmentInstant,
             paymentMethod   = request.paymentMethod,
-            status          = AppointmentStatus.PENDING
+            status          = AppointmentStatus.PENDING,
+            bookingKey      = buildBookingKey(doctorUser.id!!, appointmentInstant)
         )
+
+        val doctorSchedule = validateAppointmentSlot(appointment, date, time)
+        appointment.schedule = doctorSchedule
 
         val saved = try {
             appointmentRepository.saveAndFlush(appointment)
@@ -93,7 +114,7 @@ class AppointmentService(
             message        = "Appointment Created Successfully",
             patientName    = request.patientName,
             patientAge     = request.patientAge,
-            serviceName    = service.serviceName,
+            serviceName    = specialty.name,
             appointmentAt  = request.appointmentAt
                 .atZone(zoneId)
                 .toOffsetDateTime(),
@@ -424,7 +445,7 @@ class AppointmentService(
             clinic = clinic.user!!,
             doctor = doctorUser,
             patient = null,
-            service = null,
+            specialty = null,
             schedule = null,
             appointmentDate = date.atTime(time).atZone(zoneId).toInstant(),
             status = AppointmentStatus.CONFIRMED, // Walk-in is automatically confirmed
@@ -895,7 +916,7 @@ class AppointmentService(
         appointment: Appointment,
         date: LocalDate,
         time: LocalTime
-    ) {
+    ): Schedule {
 
         requireDateNotPast(date)
 
@@ -1004,9 +1025,11 @@ class AppointmentService(
             )
         ) {
             throw AppException(
-                "Appointment time must be in the future"
+                "Appointment date and time must be in the future"
             )
         }
+
+        return doctorSchedule
     }
 
     private fun isValidSlot(
@@ -1096,8 +1119,7 @@ class AppointmentService(
                 id!!,
 
             clinicId =
-                service?.clinic?.id
-                    ?: clinicEntity?.id
+                clinicEntity?.id
                     ?: clinicUser.id!!,
 
             clinicName =
@@ -1117,10 +1139,10 @@ class AppointmentService(
                 patient?.fullName,
 
             serviceId =
-                service?.id,
+                specialty?.id,
 
             serviceName =
-                service?.serviceName,
+                specialty?.name,
 
             scheduleId =
                 schedule?.id,

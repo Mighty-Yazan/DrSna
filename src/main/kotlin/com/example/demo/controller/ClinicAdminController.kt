@@ -33,42 +33,6 @@ class ClinicAdminController(
         return ResponseEntity.ok(updatedProfile)
     }
 
-    // ── SERVICES ENDPOINTS ──────────────────────────────────────────────
-
-    @GetMapping("/services")
-    fun getServices(authentication: Authentication): ResponseEntity<List<ServicesResponse>> {
-        val services = clinicAdminService.getServices(authentication.name)
-        return ResponseEntity.ok(services)
-    }
-
-    @PostMapping("/services")
-    fun addService(
-        authentication: Authentication,
-        @Valid @RequestBody request: ServicesRequest
-    ): ResponseEntity<ServicesResponse> {
-        val createdService = clinicAdminService.addService(authentication.name, request)
-        return ResponseEntity.status(HttpStatus.CREATED).body(createdService)
-    }
-
-    @PutMapping("/services/{id}")
-    fun updateService(
-        authentication: Authentication,
-        @PathVariable id: UUID,
-        @Valid @RequestBody request: ServicesRequest
-    ): ResponseEntity<ServicesResponse> {
-        val updatedService = clinicAdminService.updateService(authentication.name, id, request)
-        return ResponseEntity.ok(updatedService)
-    }
-
-    @DeleteMapping("/services/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteService(
-        authentication: Authentication,
-        @PathVariable id: UUID
-    ): ResponseEntity<MessageResponse> {
-        clinicAdminService.deleteService(authentication.name, id)
-        return ResponseEntity.ok(MessageResponse("Service deleted successfully"))
-    }
 
 
     @GetMapping("/reviews")

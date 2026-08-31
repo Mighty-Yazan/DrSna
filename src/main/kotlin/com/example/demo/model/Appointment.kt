@@ -21,11 +21,11 @@ class Appointment(
     var id: UUID? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "clinic_user_id", nullable = true)
+    @JoinColumn(name = "clinic_user_id", nullable = false)
     var clinic: User? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "doctor_user_id", nullable = true)
+    @JoinColumn(name = "doctor_user_id", nullable = false)
     var doctor: User? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -33,8 +33,8 @@ class Appointment(
     var patient: User? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "service_id")
-    var service: Services? = null,
+    @JoinColumn(name = "specialty_id")
+    var specialty: Specialty? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "schedule_id")

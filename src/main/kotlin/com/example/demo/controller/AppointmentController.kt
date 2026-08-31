@@ -317,12 +317,13 @@ class AppointmentController(
 
     @PostMapping("/api/appointments/book")
     fun bookAppointment(
+        authentication: Authentication?,
         @Valid
         @RequestBody
         request: BookAppointmentRequest
     ): ResponseEntity<BookAppointmentResponse> {
 
-        val response = appointmentService.bookAppointment(request)
+        val response = appointmentService.bookAppointment(authentication, request)
         return ResponseEntity.status(HttpStatus.CREATED).body(response)
     }
 }

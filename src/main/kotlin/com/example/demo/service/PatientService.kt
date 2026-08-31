@@ -15,7 +15,7 @@ import java.util.UUID
 @Service
 class PatientService(
     private val clinicRepository: ClinicRepository,
-    private val servicesRepository: ServicesRepository,
+    private val specialtyRepository: SpecialtyRepository,
     private val clinicDoctorRepository: ClinicDoctorRepository,
     private val scheduleRepository: ScheduleRepository,
     private val appointmentRepository: AppointmentRepository,
@@ -48,7 +48,7 @@ class PatientService(
 
         return clinics.asSequence()
             .filter { clinic ->
-                normalizedService == null || servicesRepository.existsByClinicIdAndServiceNameIgnoreCase(clinic.id!!, normalizedService)
+                normalizedService == null || clinicSpecialtyRepository.findAllByClinicId(clinic.id!!).any { it.specialty?.name?.equals(normalizedService, ignoreCase = true) == true }
             }
             .filter { clinic ->
                 normalizedSpecialty == null || clinicSpecialtyRepository.findAllByClinicId(clinic.id!!).any { it.specialty?.name?.equals(normalizedSpecialty, ignoreCase = true) == true }
@@ -66,8 +66,8 @@ class PatientService(
         val clinic = clinicRepository.findDetailsById(clinicId)
             .orElseThrow { ResourceNotFoundException("Clinic not found with ID: $clinicId") }
 
-        val services = servicesRepository.findAllByClinicId(clinicId).map {
-            ServiceDetailsResponse(it.id!!, it.serviceName, it.descriptionOfService)
+        val services = clinicSpecialtyRepository.findAllByClinicId(clinicId).mapNotNull { it.specialty }.map {
+            ServiceDetailsResponse(it.id!!, it.name, "")
         }
 
         val allClinicSchedules = scheduleRepository.findByClinicId(clinicId)
@@ -204,16 +204,16 @@ class PatientService(
         val doctor = userRepository.findById(doctorId)
             .orElseThrow { ResourceNotFoundException("Doctor not found with ID: $doctorId") }
 
-        val service = try {
+        val specialty = try {
             val uuid = UUID.fromString(serviceIdReq.toString())
-            servicesRepository.findById(uuid).orElseThrow { ResourceNotFoundException("Service not found") }
+            specialtyRepository.findById(uuid).orElseThrow { ResourceNotFoundException("Specialty not found") }
         } catch (_: IllegalArgumentException) {
             val parsedLong = serviceIdReq.toString().toLongOrNull()
             if (parsedLong != null) {
-                servicesRepository.findAll().firstOrNull { it.id.toString() == serviceIdReq.toString() }
-                    ?: throw ResourceNotFoundException("Service not found")
+                specialtyRepository.findAll().firstOrNull { it.id.toString() == serviceIdReq.toString() }
+                    ?: throw ResourceNotFoundException("Specialty not found")
             } else {
-                throw ResourceNotFoundException("Service not found")
+                throw ResourceNotFoundException("Specialty not found")
             }
         }
 
@@ -229,10 +229,8 @@ class PatientService(
         if (patient.role != Role.PATIENT) throw AppException("Only patients can create appointments")
         if (!doctor.isActive) throw AppException("Doctor account is inactive and cannot receive bookings")
 
-        val serviceClinicId = service.clinic?.id
-        if (serviceClinicId != null && serviceClinicId != clinicId) {
-            throw AppException("Service does not belong to the selected clinic")
-        }
+        // Removed serviceClinicId check because Specialty does not have a clinic field directly.
+        // ClinicSpecialty manages the many-to-many relationship instead.
 
         if (schedule.clinic?.id != clinicId || schedule.doctor?.id != doctorId) {
             throw AppException("Schedule does not belong to the selected clinic and doctor")
@@ -285,7 +283,7 @@ class PatientService(
             clinic = clinic.user,
             doctor = doctor,
             patient = patient,
-            service = service,
+            specialty = specialty,
             schedule = schedule,
             appointmentDate = appointmentAt,
             status = AppointmentStatus.PENDING,
@@ -505,7 +503,7 @@ class PatientService(
             checkingFee = checkingFee,
             description = description,
             workingHours = dynamicWorkingHours,
-            services = servicesRepository.findAllByClinicId(id!!).map { it.serviceName },
+            services = clinicSpecialtyRepository.findAllByClinicId(id!!).mapNotNull { it.specialty?.name },
             specialties = clinicSpecialtyRepository.findAllByClinicId(id!!).mapNotNull { it.specialty?.name },
             doctors = clinicDoctorRepository.findAllByClinic_Id(user!!.id!!)
                 .filter { it.doctor?.isActive == true }
@@ -540,11 +538,11 @@ class PatientService(
     private fun Appointment.toResponse(zoneId: ZoneId) = AppointmentResponse(
         appointmentId = id!!,
         patientId = patient!!.id!!,
-        clinicId = service?.clinic?.id ?: clinic!!.id!!,
+        clinicId = clinic!!.id!!,
         doctorId = doctor!!.id!!,
         doctorName = doctor!!.fullName,
-        serviceId = service!!.id!!,
-        serviceName = service!!.serviceName,
+        serviceId = specialty!!.id!!,
+        serviceName = specialty!!.name,
         scheduleId = schedule?.id,
         appointmentAt = appointmentDate!!.atZone(zoneId).toOffsetDateTime(),
         createdAt = createdAt.atZone(zoneId).toOffsetDateTime(),

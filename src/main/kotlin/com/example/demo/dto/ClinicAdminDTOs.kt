@@ -49,22 +49,7 @@ data class ClinicProfileResponse(
     val city: City
 )
 
-// ── SERVICE DTOs ────────────────────────────────────────────────────
 
-data class ServicesRequest(
-    @field:NotBlank(message = "Clinic service cannot be blank")
-    @field:Size(max = 100, message = "Clinic service must not exceed 100 characters")
-    val serviceName: String,
-
-    val descriptionOfService: String?
-)
-
-data class ServicesResponse(
-    val id: UUID,
-    val clinicId: UUID,
-    val serviceName: String,
-    val descriptionOfService: String?
-)
 
 // ── DOCTOR DTOs ──────────────────────────────────────────────────────
 
