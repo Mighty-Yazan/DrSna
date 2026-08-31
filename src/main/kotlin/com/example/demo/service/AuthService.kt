@@ -128,7 +128,45 @@ class AuthService(
             email = user.email,
             city = user.city,
             role = user.role,
-            clinicLicenseNumber = user.clinicLicenseNumber
+            clinicLicenseNumber = user.clinicLicenseNumber,
+            bio = user.bio,
+            specialty = user.specialty
+        )
+    }
+
+    // Edit Info: Patient / Doctor self-service profile update
+    fun updateProfile(email: String, request: UpdateProfileRequest): UserProfileResponse {
+        val user = userRepository.findByEmail(email)
+            .orElseThrow { ResourceNotFoundException("User not found with email: $email") }
+
+        user.fullName = request.fullName.trim()
+        request.city?.let { user.city = it }
+        user.bio = request.bio
+
+        // Specialty is a doctor-only concept
+        if (user.role == Role.DOCTOR) {
+            user.specialty = request.specialty
+        }
+        request.email?.let { newEmail ->
+            val email = newEmail.trim().lowercase()
+
+            if (email != user.email && userRepository.existsByEmail(email)) {
+                throw IllegalArgumentException("Email is already in use")
+            }
+
+            user.email = email
+        }
+        val savedUser = userRepository.save(user)
+
+        return UserProfileResponse(
+            userId = savedUser.id,
+            fullName = savedUser.fullName,
+            email = savedUser.email,
+            city = savedUser.city,
+            role = savedUser.role,
+            clinicLicenseNumber = savedUser.clinicLicenseNumber,
+            bio = savedUser.bio,
+            specialty = savedUser.specialty
         )
     }
 

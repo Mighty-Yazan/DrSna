@@ -19,6 +19,12 @@ interface ScheduleRepository : JpaRepository<Schedule, Long> {
 
     fun findAllByClinicId(clinicId: UUID): List<Schedule>
 
+    fun findAllByDoctor_Id(doctorId: UUID): List<Schedule>
+    fun findAllByDoctor_IdAndType(
+        doctorId: UUID,
+        type: ScheduleType
+    ): List<Schedule>
+
     fun deleteByClinicIdAndDoctor_IdAndTypeAndSpecificDate(clinicId: UUID, doctorId: UUID, type: ScheduleType, specificDate: LocalDate)
 
     fun deleteByClinicIdAndTypeAndDayOfWeek(clinicId: UUID, type: ScheduleType, dayOfWeek: DayOfWeek)

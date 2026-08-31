@@ -98,11 +98,22 @@ data class UserProfileResponse(
     val email: String,
     val city: City,
     val role: Role,
-    val clinicLicenseNumber: String? = null
+    val clinicLicenseNumber: String? = null,
+    val bio: String? = null,
+    val specialty: String? = null
 )
+
 
 // ── General ──────────────────────────────────────────────────────────
 
 data class MessageResponse(
     val message: String
+)
+
+// ── Wallet (static placeholder section) ─────────────────────────────
+
+data class WalletResponse(
+    val balance: java.math.BigDecimal = java.math.BigDecimal.ZERO,
+    val currency: String = "JOD",
+    val message: String = "Wallet feature is coming soon"
 )

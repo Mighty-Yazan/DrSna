@@ -54,4 +54,9 @@ class PatientController(private val patientService: PatientService) {
     ): ResponseEntity<AppointmentResponse> =
         ResponseEntity.status(HttpStatus.CREATED)
             .body(patientService.createAppointment(authentication.name, request))
+
+    // Wallet: static placeholder section
+    @GetMapping("/wallet")
+    fun wallet(): ResponseEntity<WalletResponse> =
+        ResponseEntity.ok(WalletResponse())
 }

@@ -12,6 +12,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
 
+
 @Service
 class ScheduleAdminService(
     private val scheduleRepository: ScheduleRepository,
@@ -159,6 +160,18 @@ class ScheduleAdminService(
         return scheduleRepository.findByClinicId(clinic.id!!)
             .filter { it.doctor?.id == doctorId && it.type == ScheduleType.DOCTOR_SHIFT }
             .map { it.toResponseDto() }
+    }
+
+    // Doctor's own schedule (read-only, doctor account type only)
+    @Transactional(readOnly = true)
+    fun getMySchedule(doctorEmail: String): List<ScheduleResponseDto> {
+        val doctor = userRepository.findByEmail(doctorEmail)
+            .orElseThrow { ResourceNotFoundException("Authenticated doctor was not found") }
+
+        return scheduleRepository.findAllByDoctor_IdAndType(
+            doctor.id!!,
+            ScheduleType.DOCTOR_SHIFT
+        ).map { it.toResponseDto() }
     }
 
     private fun getClinic(email: String): Clinic = clinicRepository.findByUserEmail(email)

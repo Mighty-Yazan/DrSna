@@ -55,6 +55,15 @@ interface AppointmentRepository : JpaRepository<Appointment, UUID> {
         from: Instant
     ): List<Appointment>
 
+    fun findAllByDoctor_IdAndAppointmentDateLessThanOrderByAppointmentDateDesc(
+        doctorId: UUID,
+        before: Instant
+    ): List<Appointment>
+
+    fun findAllByDoctor_IdOrderByAppointmentDateAsc(
+        doctorId: UUID
+    ): List<Appointment>
+
     fun findAllByClinic_IdAndAppointmentDateGreaterThanEqualOrderByAppointmentDateAsc(
         clinicId: UUID,
         from: Instant

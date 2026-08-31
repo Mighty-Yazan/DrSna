@@ -5,6 +5,7 @@ import com.example.demo.service.AuthService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.*
@@ -39,6 +40,18 @@ class AuthController(
         val userEmail = jwt.subject
         val profile = authService.getProfile(userEmail!!)
         return ResponseEntity.ok(profile)
+    }
+
+    // Edit Info: available to Patient and Doctor accounts only
+    @PutMapping("/me")
+    @PreAuthorize("hasAnyRole('PATIENT','DOCTOR')")
+    fun updateProfile(
+        @AuthenticationPrincipal jwt: Jwt,
+        @Valid @RequestBody request: UpdateProfileRequest
+    ): ResponseEntity<UserProfileResponse> {
+        val userEmail = jwt.subject
+        val updated = authService.updateProfile(userEmail!!, request)
+        return ResponseEntity.ok(updated)
     }
 
     // Protected: Blacklists the current token's JTI so it cannot be reused

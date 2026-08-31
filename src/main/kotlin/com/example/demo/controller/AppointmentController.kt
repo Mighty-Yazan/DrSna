@@ -99,7 +99,10 @@ class AppointmentController(
         authentication: Authentication,
         @RequestParam(required = false)
         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-        date: LocalDate?
+        date: LocalDate?,
+        // "upcoming" (Appointments) | "past" (History Appointment) | "all"
+        @RequestParam(required = false, defaultValue = "upcoming")
+        scope: String
     ): ResponseEntity<List<AppointmentSummaryResponse>> {
 
         val username = authentication.name
@@ -110,7 +113,8 @@ class AppointmentController(
         return ResponseEntity.ok(
             appointmentService.getDoctorAppointments(
                 username,
-                date
+                date,
+                scope
             )
         )
     }

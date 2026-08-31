@@ -180,7 +180,8 @@ class AppointmentService(
     @Transactional(readOnly = true)
     fun getDoctorAppointments(
         doctorEmail: String,
-        date: LocalDate?
+        date: LocalDate?,
+        scope: String = "upcoming"
     ): List<AppointmentSummaryResponse> {
 
         val doctor = userRepository.findByEmail(doctorEmail)
@@ -190,36 +191,72 @@ class AppointmentService(
                 )
             }
 
+        // A specific date takes priority over scope (used by the doctor's day view)
+        if (date != null) {
+
+            requireDateNotPast(date)
+
+            val from =
+                date.atStartOfDay(zoneId).toInstant()
+
+            val to =
+                date.plusDays(1)
+                    .atStartOfDay(zoneId)
+                    .toInstant()
+
+            return appointmentRepository
+                .findAllByDoctorIdAndAppointmentDateBetween(
+                    doctor.id!!,
+                    from,
+                    to
+                )
+                .sortedBy {
+                    it.appointmentDate
+                }
+                .map {
+                    it.toSummary()
+                }
+        }
+
+        // ── Appointments (upcoming) / History Appointment (past) / all ──
+        val normalizedScope =
+            scope.trim().lowercase().ifEmpty {
+                "upcoming"
+            }
+
+        if (
+            normalizedScope !in
+            listOf("upcoming", "past", "all")
+        ) {
+            throw AppException(
+                "Invalid scope '$scope'. Allowed values are: upcoming, past, all"
+            )
+        }
+
+        val now = Instant.now()
+
         val appointments =
-            if (date != null) {
+            when (normalizedScope) {
 
-                requireDateNotPast(date)
+                "upcoming" ->
+                    appointmentRepository
+                        .findAllByDoctor_IdAndAppointmentDateGreaterThanEqualOrderByAppointmentDateAsc(
+                            doctor.id!!,
+                            now
+                        )
 
-                val from =
-                    date.atStartOfDay(zoneId).toInstant()
+                "past" ->
+                    appointmentRepository
+                        .findAllByDoctor_IdAndAppointmentDateLessThanOrderByAppointmentDateDesc(
+                            doctor.id!!,
+                            now
+                        )
 
-                val to =
-                    date.plusDays(1)
-                        .atStartOfDay(zoneId)
-                        .toInstant()
-
-                appointmentRepository
-                    .findAllByDoctorIdAndAppointmentDateBetween(
-                        doctor.id!!,
-                        from,
-                        to
-                    )
-                    .sortedBy {
-                        it.appointmentDate
-                    }
-
-            } else {
-
-                appointmentRepository
-                    .findAllByDoctor_IdAndAppointmentDateGreaterThanEqualOrderByAppointmentDateAsc(
-                        doctor.id!!,
-                        Instant.now()
-                    )
+                else ->
+                    appointmentRepository
+                        .findAllByDoctor_IdOrderByAppointmentDateAsc(
+                            doctor.id!!
+                        )
             }
 
         return appointments.map {
