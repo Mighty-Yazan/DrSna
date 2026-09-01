@@ -485,9 +485,11 @@ class PatientService(
         val today = LocalDate.now(zoneId)
         for (i in 0..14L) {
             val date = today.plusDays(i)
-            val slots = getAvailability(clinicId, date, null)
-            if (slots.isNotEmpty()) {
-                val earliest = slots.minByOrNull { it.time } ?: continue
+            // Filter only slots that are actually available (available == true)
+            val availableSlots = getAvailability(clinicId, date, null).filter { it.available }
+
+            if (availableSlots.isNotEmpty()) {
+                val earliest = availableSlots.minByOrNull { it.time } ?: continue
                 val dateStr = when (i) {
                     0L -> "Today"
                     1L -> "Tomorrow"
