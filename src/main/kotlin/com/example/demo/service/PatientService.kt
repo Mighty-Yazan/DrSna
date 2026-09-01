@@ -136,10 +136,23 @@ class PatientService(
             throw ResourceNotFoundException("Doctor is not associated with this clinic")
         }
 
+        val allSchedules = scheduleRepository.findByClinicId(clinicId)
+
+        // ── 1. Check if Clinic is Open on this Day of the Week ──
+        val dayOfWeek = date.dayOfWeek
+        val clinicHours = allSchedules.firstOrNull {
+            it.type == ScheduleType.CLINIC_HOURS && it.dayOfWeek == dayOfWeek
+        }
+
+        // If clinic is closed on this day (no record, or null times), return NO slots
+        if (clinicHours == null || clinicHours.startTime == null || clinicHours.endTime == null) {
+            return emptyList()
+        }
+
+        // ── 2. Check Clinic Specific Holiday ──
         val isClinicHoliday = scheduleRepository.existsByClinicIdAndSpecificDateAndType(clinicId, date, ScheduleType.HOLIDAY)
         if (isClinicHoliday) return emptyList()
 
-        val allSchedules = scheduleRepository.findByClinicId(clinicId)
         val now = Instant.now()
 
         return doctorRelations.flatMap { relation ->
@@ -155,9 +168,10 @@ class PatientService(
                 it.doctor?.id == doctor.id && it.type == ScheduleType.DOCTOR_SHIFT && it.specificDate == date
             } ?: return@flatMap emptyList()
 
-            val startShift = doctorSchedule.startTime!!
-            val endShift = doctorSchedule.endTime!!
-            if (startShift >= endShift) return@flatMap emptyList()
+            // Intersect doctor shift with clinic working hours
+            val startShift = maxOf(clinicHours.startTime!!, doctorSchedule.startTime!!)
+            val endShift = minOf(clinicHours.endTime!!, doctorSchedule.endTime!!)
+            if (!startShift.isBefore(endShift)) return@flatMap emptyList()
 
             val from = date.atStartOfDay(zoneId).toInstant()
             val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
@@ -171,7 +185,7 @@ class PatientService(
                 val instant = appointmentAt.toInstant()
                 if (instant.isBefore(now)) return@mapNotNull null
                 AvailabilitySlotResponse(
-                    scheduleId = doctorSchedule?.id,
+                    scheduleId = doctorSchedule.id,
                     doctorId = doctor.id!!,
                     doctorName = doctor.fullName,
                     date = date,
@@ -340,11 +354,21 @@ class PatientService(
         clinic.rating = if (reviews.isEmpty()) java.math.BigDecimal.ZERO else reviews.map { it.rating }.average().toBigDecimal().setScale(1, java.math.RoundingMode.HALF_UP)
         clinicRepository.save(clinic)
     }
-
     private fun hasAnyAvailableSlot(clinicId: UUID, date: LocalDate): Boolean {
         if (date.isBefore(LocalDate.now(zoneId))) return false
         val clinic = clinicRepository.findById(clinicId).orElse(null) ?: return false
         val clinicUser = clinic.user ?: return false
+
+        val allSchedules = scheduleRepository.findByClinicId(clinicId)
+
+        // Verify clinic is open on this day of the week
+        val dayOfWeek = date.dayOfWeek
+        val clinicHours = allSchedules.firstOrNull {
+            it.type == ScheduleType.CLINIC_HOURS && it.dayOfWeek == dayOfWeek
+        }
+        if (clinicHours == null || clinicHours.startTime == null || clinicHours.endTime == null) {
+            return false
+        }
 
         val isClinicHoliday = scheduleRepository.existsByClinicIdAndSpecificDateAndType(clinicId, date, ScheduleType.HOLIDAY)
         if (isClinicHoliday) return false
@@ -353,7 +377,6 @@ class PatientService(
         val from = date.atStartOfDay(zoneId).toInstant()
         val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
         val now = Instant.now()
-        val allSchedules = scheduleRepository.findByClinicId(clinicId)
 
         return relations.any { relation ->
             val doctor = relation.doctor ?: return@any false
@@ -368,9 +391,9 @@ class PatientService(
                 it.doctor?.id == doctor.id && it.type == ScheduleType.DOCTOR_SHIFT && it.specificDate == date
             } ?: return@any false
 
-            val start = doctorSchedule.startTime!!
-            val end = doctorSchedule.endTime!!
-            if (start >= end) return@any false
+            val start = maxOf(clinicHours.startTime!!, doctorSchedule.startTime!!)
+            val end = minOf(clinicHours.endTime!!, doctorSchedule.endTime!!)
+            if (!start.isBefore(end)) return@any false
 
             val booked = appointmentRepository.findAllByDoctorIdAndAppointmentDateBetween(doctor.id!!, from, to)
                 .filter { it.status != AppointmentStatus.CANCELLED }

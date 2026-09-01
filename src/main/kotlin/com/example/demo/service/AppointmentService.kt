@@ -37,6 +37,7 @@ class AppointmentService(
     private val clinicDoctorRepository: ClinicDoctorRepository,
     private val scheduleRepository: ScheduleRepository,
     private val specialtyRepository: SpecialtyRepository
+
 ) {
 
     private val zoneId = ZoneId.of("Asia/Amman")
@@ -57,7 +58,7 @@ class AppointmentService(
         val date = request.appointmentAt.toLocalDate()
         val time = request.appointmentAt.toLocalTime()
 
-        // 1. Validate that the appointmentAt is not in the past
+        // 1. Validate that appointmentAt is in the future
         val appointmentInstant = request.appointmentAt
             .atZone(zoneId)
             .toInstant()
@@ -83,7 +84,13 @@ class AppointmentService(
             userRepository.findByEmail(email).orElse(null)
         }
 
-        // 3. Build the Appointment entity
+        // 3. Build booking key & check for duplicate slot upfront
+        val bookingKey = buildBookingKey(doctorUser.id!!, appointmentInstant)
+        if (appointmentRepository.existsByBookingKey(bookingKey)) {
+            throw DuplicateResourceException("The selected appointment slot has already been booked. Please choose another time.")
+        }
+
+        // 4. Build Appointment entity
         val appointment = Appointment(
             clinic          = clinicUser,
             doctor          = doctorUser,
@@ -94,19 +101,16 @@ class AppointmentService(
             appointmentDate = appointmentInstant,
             paymentMethod   = request.paymentMethod,
             status          = AppointmentStatus.PENDING,
-            bookingKey      = buildBookingKey(doctorUser.id!!, appointmentInstant)
+            bookingKey      = bookingKey
         )
 
-        val doctorSchedule = validateAppointmentSlot(appointment, date, time)
+        val doctorSchedule = this.validateAppointmentSlot(appointment, date, time)
         appointment.schedule = doctorSchedule
 
-        val saved = try {
-            appointmentRepository.saveAndFlush(appointment)
-        } catch (e: Exception) {
-            throw AppException("Failed to save appointment: ${e.message}")
-        }
+        // 5. Use saveSafely to handle concurrency/race conditions gracefully
+        val saved = saveSafely(appointment)
 
-        // 4. Return the confirmation response
+        // 6. Return confirmation response
         return BookAppointmentResponse(
             appointmentId  = saved.id!!,
             message        = "Appointment Created Successfully",
@@ -120,7 +124,6 @@ class AppointmentService(
             status         = saved.status
         )
     }
-
     // ============================================================
     // PATIENT
     // ============================================================
@@ -990,6 +993,28 @@ class AppointmentService(
         val clinicId =
             clinic.id!!
 
+        // Fetch all schedules for this clinic using existing ScheduleRepository method
+        val schedules =
+            scheduleRepository
+                .findByClinicId(clinicId)
+
+        // ── 1. Check if Clinic is Open on this Day of the Week (CLINIC_HOURS) ──
+        val dayOfWeek = date.dayOfWeek
+        val clinicDaySchedule = schedules.firstOrNull {
+            it.type == ScheduleType.CLINIC_HOURS && it.dayOfWeek == dayOfWeek
+        }
+
+        if (clinicDaySchedule == null || clinicDaySchedule.startTime == null || clinicDaySchedule.endTime == null) {
+            val dayName = dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }
+            throw AppException("The clinic is closed on ${dayName}s")
+        }
+
+        // Validate time is within clinic opening hours
+        if (time.isBefore(clinicDaySchedule.startTime) || time.plusMinutes(60).isAfter(clinicDaySchedule.endTime)) {
+            throw AppException("Selected time is outside the clinic's operating hours (${clinicDaySchedule.startTime} - ${clinicDaySchedule.endTime})")
+        }
+
+        // ── 2. Check Clinic Specific Holiday ──
         val isClinicHoliday =
             scheduleRepository
                 .existsByClinicIdAndSpecificDateAndType(
@@ -1004,10 +1029,7 @@ class AppointmentService(
             )
         }
 
-        val schedules =
-            scheduleRepository
-                .findByClinicId(clinicId)
-
+        // ── 3. Check Doctor Holiday ──
         val isDoctorHoliday =
             schedules.any {
                 it.doctor?.id == doctorId &&
@@ -1022,12 +1044,12 @@ class AppointmentService(
             )
         }
 
+        // ── 4. Check Doctor Shift (Date-specific or Recurring Day) ──
         val doctorSchedule =
             schedules.firstOrNull {
                 it.doctor?.id == doctorId &&
-                        it.type ==
-                        ScheduleType.DOCTOR_SHIFT &&
-                        it.specificDate == date
+                        it.type == ScheduleType.DOCTOR_SHIFT &&
+                        (it.specificDate == date || (it.specificDate == null && it.dayOfWeek == dayOfWeek))
             }
                 ?: throw AppException(
                     "Doctor is not scheduled to work on this day"
@@ -1066,7 +1088,6 @@ class AppointmentService(
 
         return doctorSchedule
     }
-
     private fun isValidSlot(
         start: LocalTime,
         end: LocalTime,
