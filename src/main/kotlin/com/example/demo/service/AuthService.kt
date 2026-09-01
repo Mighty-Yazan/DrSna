@@ -128,9 +128,7 @@ class AuthService(
             email = user.email,
             city = user.city,
             role = user.role,
-            clinicLicenseNumber = user.clinicLicenseNumber,
-            bio = user.bio,
-            specialty = user.specialty
+            clinicLicenseNumber = user.clinicLicenseNumber
         )
     }
 
@@ -141,12 +139,14 @@ class AuthService(
 
         user.fullName = request.fullName.trim()
         request.city?.let { user.city = it }
-        user.bio = request.bio
 
-        // Specialty is a doctor-only concept
-        if (user.role == Role.DOCTOR) {
-            user.specialty = request.specialty
+        if (!request.password.isNullOrBlank()) {
+            if (request.password != request.confirmPassword) {
+                throw PasswordMismatchException()
+            }
+            user.password = passwordEncoder.encode(request.password)!!
         }
+
         request.email?.let { newEmail ->
             val email = newEmail.trim().lowercase()
 
@@ -164,9 +164,7 @@ class AuthService(
             email = savedUser.email,
             city = savedUser.city,
             role = savedUser.role,
-            clinicLicenseNumber = savedUser.clinicLicenseNumber,
-            bio = savedUser.bio,
-            specialty = savedUser.specialty
+            clinicLicenseNumber = savedUser.clinicLicenseNumber
         )
     }
 

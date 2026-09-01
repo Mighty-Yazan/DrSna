@@ -55,6 +55,28 @@ class PatientController(private val patientService: PatientService) {
         ResponseEntity.status(HttpStatus.CREATED)
             .body(patientService.createAppointment(authentication.name, request))
 
+    @GetMapping("/favorites")
+    fun getFavoriteDoctors(authentication: Authentication): ResponseEntity<List<FavoriteDoctorResponse>> =
+        ResponseEntity.ok(patientService.getFavoriteDoctors(authentication.name))
+
+    @PostMapping("/favorites")
+    fun addFavoriteDoctor(
+        authentication: Authentication,
+        @Valid @RequestBody request: AddFavoriteDoctorRequest
+    ): ResponseEntity<MessageResponse> {
+        patientService.addFavoriteDoctor(authentication.name, request.doctorId)
+        return ResponseEntity.status(HttpStatus.CREATED).body(MessageResponse("Doctor added to favorites"))
+    }
+
+    @DeleteMapping("/favorites/{doctorId}")
+    fun removeFavoriteDoctor(
+        authentication: Authentication,
+        @PathVariable doctorId: UUID
+    ): ResponseEntity<MessageResponse> {
+        patientService.removeFavoriteDoctor(authentication.name, doctorId)
+        return ResponseEntity.ok(MessageResponse("Doctor removed from favorites"))
+    }
+
     // Wallet: static placeholder section
     @GetMapping("/wallet")
     fun wallet(): ResponseEntity<WalletResponse> =

@@ -85,7 +85,7 @@ data class AvailabilitySlotResponse(
 data class CreateAppointmentRequest(
     @field:NotNull(message = "Clinic ID is required") val clinicId: UUID?,
     @field:NotNull(message = "Doctor ID is required") val doctorId: UUID?,
-    @field:NotNull(message = "Service ID is required") val serviceId: Any?,
+    @field:NotNull(message = "Service IDs are required") val serviceIds: List<UUID>,
     @field:NotNull(message = "Schedule ID is required") val scheduleId: Any?,
     @field:NotNull(message = "Appointment date is required") val appointmentDate: LocalDate?,
     @field:NotNull(message = "Appointment time is required") val appointmentTime: LocalTime?
@@ -97,8 +97,8 @@ data class AppointmentResponse(
     val clinicId: UUID,
     val doctorId: UUID,
     val doctorName: String,
-    val serviceId: Any,
-    val serviceName: String,
+    val serviceIds: List<Any>,
+    val serviceNames: List<String>,
     val scheduleId: Any?,
     val appointmentAt: OffsetDateTime,
     val createdAt: OffsetDateTime,
@@ -113,8 +113,8 @@ data class AppointmentFilterResponse(
     val clinicName: String,
     val doctorId: UUID,
     val doctorName: String,
-    val serviceId: UUID,
-    val serviceName: String,
+    val serviceIds: List<UUID>,
+    val serviceNames: List<String>,
     val appointmentAt: OffsetDateTime,
     val status: AppointmentStatus,
     val createdAt: OffsetDateTime

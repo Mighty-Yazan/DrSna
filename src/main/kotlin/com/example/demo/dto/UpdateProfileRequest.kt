@@ -17,9 +17,7 @@ data class UpdateProfileRequest(
 
     val city: City,
 
-    @field:Size(max = 1000, message = "Bio must not exceed 1000 characters")
-    val bio: String? = null,
+    val password: String? = null,
 
-    @field:Size(max = 100, message = "Specialty must not exceed 100 characters")
-    val specialty: String? = null
+    val confirmPassword: String? = null
 )

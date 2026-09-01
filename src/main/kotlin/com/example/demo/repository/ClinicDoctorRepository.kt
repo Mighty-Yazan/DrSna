@@ -9,5 +9,6 @@ import java.util.UUID
 @Repository
 interface ClinicDoctorRepository : JpaRepository<ClinicDoctor, ClinicDoctorId> {
     fun findAllByClinic_Id(clinicUserId: UUID): List<ClinicDoctor>
+    fun findAllByDoctor_Id(doctorUserId: UUID): List<ClinicDoctor>
     fun existsByClinic_IdAndDoctor_Id(clinicUserId: UUID, doctorUserId: UUID): Boolean
 }

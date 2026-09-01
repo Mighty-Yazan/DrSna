@@ -21,7 +21,8 @@ class PatientService(
     private val appointmentRepository: AppointmentRepository,
     private val userRepository: UserRepository,
     private val clinicSpecialtyRepository: ClinicSpecialtyRepository,
-    private val reviewRepository: ReviewRepository
+    private val reviewRepository: ReviewRepository,
+    private val favoriteDoctorRepository: FavoriteDoctorRepository
 ) {
     private val zoneId = ZoneId.of("Asia/Amman")
 
@@ -186,7 +187,10 @@ class PatientService(
     fun createAppointment(patientEmail: String, request: CreateAppointmentRequest): AppointmentResponse {
         val clinicId = request.clinicId ?: throw AppException("Clinic ID is required")
         val doctorId = request.doctorId ?: throw AppException("Doctor ID is required")
-        val serviceIdReq = request.serviceId ?: throw AppException("Service ID is required")
+        val serviceIdsReq = request.serviceIds
+        if (serviceIdsReq.isEmpty()) {
+            throw AppException("At least one Service ID is required")
+        }
         val scheduleIdReq = request.scheduleId ?: throw AppException("Schedule ID is required")
         val date = request.appointmentDate ?: throw AppException("Appointment date is required")
         val time = request.appointmentTime ?: throw AppException("Appointment time is required")
@@ -204,17 +208,9 @@ class PatientService(
         val doctor = userRepository.findById(doctorId)
             .orElseThrow { ResourceNotFoundException("Doctor not found with ID: $doctorId") }
 
-        val specialty = try {
-            val uuid = UUID.fromString(serviceIdReq.toString())
-            specialtyRepository.findById(uuid).orElseThrow { ResourceNotFoundException("Specialty not found") }
-        } catch (_: IllegalArgumentException) {
-            val parsedLong = serviceIdReq.toString().toLongOrNull()
-            if (parsedLong != null) {
-                specialtyRepository.findAll().firstOrNull { it.id.toString() == serviceIdReq.toString() }
-                    ?: throw ResourceNotFoundException("Specialty not found")
-            } else {
-                throw ResourceNotFoundException("Specialty not found")
-            }
+        val specialtiesList = specialtyRepository.findAllById(serviceIdsReq)
+        if (specialtiesList.isEmpty()) {
+            throw ResourceNotFoundException("No valid specialties found for the provided IDs")
         }
 
         val parsedScheduleId = scheduleIdReq.toString().toLongOrNull()
@@ -283,7 +279,7 @@ class PatientService(
             clinic = clinic.user,
             doctor = doctor,
             patient = patient,
-            specialty = specialty,
+            specialties = specialtiesList.toMutableList(),
             schedule = schedule,
             appointmentDate = appointmentAt,
             status = AppointmentStatus.PENDING,
@@ -541,11 +537,63 @@ class PatientService(
         clinicId = clinic!!.id!!,
         doctorId = doctor!!.id!!,
         doctorName = doctor!!.fullName,
-        serviceId = specialty!!.id!!,
-        serviceName = specialty!!.name,
+        serviceIds = specialties.mapNotNull { it.id },
+        serviceNames = specialties.map { it.name },
         scheduleId = schedule?.id,
         appointmentAt = appointmentDate!!.atZone(zoneId).toOffsetDateTime(),
         createdAt = createdAt.atZone(zoneId).toOffsetDateTime(),
         status = status
     )
+
+    @Transactional
+    fun addFavoriteDoctor(patientEmail: String, doctorId: UUID) {
+        val patient = userRepository.findByEmail(patientEmail).orElseThrow { ResourceNotFoundException("Patient not found") }
+        val doctor = userRepository.findById(doctorId).orElseThrow { ResourceNotFoundException("Doctor not found") }
+        
+        if (doctor.role != Role.DOCTOR) {
+            throw AppException("Only doctors can be added to favorites")
+        }
+        
+        if (favoriteDoctorRepository.existsByPatientIdAndDoctorId(patient.id!!, doctor.id!!)) {
+            throw DuplicateResourceException("Doctor is already in favorites")
+        }
+        
+        favoriteDoctorRepository.save(FavoriteDoctor(patient = patient, doctor = doctor))
+    }
+
+    @Transactional
+    fun removeFavoriteDoctor(patientEmail: String, doctorId: UUID) {
+        val patient = userRepository.findByEmail(patientEmail).orElseThrow { ResourceNotFoundException("Patient not found") }
+        
+        if (!favoriteDoctorRepository.existsByPatientIdAndDoctorId(patient.id!!, doctorId)) {
+            throw ResourceNotFoundException("Doctor is not in your favorites")
+        }
+        
+        favoriteDoctorRepository.deleteByPatientIdAndDoctorId(patient.id!!, doctorId)
+    }
+
+    @Transactional(readOnly = true)
+    fun getFavoriteDoctors(patientEmail: String): List<FavoriteDoctorResponse> {
+        val patient = userRepository.findByEmail(patientEmail).orElseThrow { ResourceNotFoundException("Patient not found") }
+        val favorites = favoriteDoctorRepository.findByPatientId(patient.id!!)
+        
+        return favorites.map { fav ->
+            val doctor = fav.doctor
+            val clinicRelation = clinicDoctorRepository.findAllByDoctor_Id(doctor.id!!).firstOrNull()
+            val clinicUser = clinicRelation?.clinic
+            val clinic = clinicUser?.let { clinicRepository.findByUserId(it.id!!).orElse(null) }
+            
+            val specialties = if (clinic != null) {
+                clinicSpecialtyRepository.findAllByClinicId(clinic.id!!).mapNotNull { it.specialty?.name }.joinToString(", ")
+            } else null
+            
+            FavoriteDoctorResponse(
+                id = fav.id!!,
+                doctorName = doctor.fullName,
+                clinicName = clinic?.clinicName ?: clinicUser?.fullName,
+                specialties = specialties,
+                city = doctor.city
+            )
+        }
+    }
 }

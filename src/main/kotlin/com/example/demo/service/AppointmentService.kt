@@ -74,12 +74,10 @@ class AppointmentService(
         val doctorUser = userRepository.findById(request.doctorId)
             .orElseThrow { ResourceNotFoundException("Doctor with ID '${request.doctorId}' was not found") }
 
-        val specialty = specialtyRepository.findById(request.serviceId)
-            .orElseThrow {
-                ResourceNotFoundException(
-                    "Specialty with ID '${request.serviceId}' was not found"
-                )
-            }
+        val specialtiesList = specialtyRepository.findAllById(request.serviceIds)
+        if (specialtiesList.isEmpty()) {
+            throw ResourceNotFoundException("No valid specialties found for the provided IDs")
+        }
 
         val patientUser = authentication?.name?.let { email ->
             userRepository.findByEmail(email).orElse(null)
@@ -92,7 +90,7 @@ class AppointmentService(
             patient         = patientUser,
             formPatientName = request.patientName,
             formPatientAge  = request.patientAge,
-            specialty       = specialty,
+            specialties     = specialtiesList.toMutableList(),
             appointmentDate = appointmentInstant,
             paymentMethod   = request.paymentMethod,
             status          = AppointmentStatus.PENDING,
@@ -114,7 +112,7 @@ class AppointmentService(
             message        = "Appointment Created Successfully",
             patientName    = request.patientName,
             patientAge     = request.patientAge,
-            serviceName    = specialty.name,
+            serviceNames   = specialtiesList.map { it.name },
             appointmentAt  = request.appointmentAt
                 .atZone(zoneId)
                 .toOffsetDateTime(),
@@ -482,7 +480,7 @@ class AppointmentService(
             clinic = clinic.user!!,
             doctor = doctorUser,
             patient = null,
-            specialty = null,
+            specialties = mutableListOf(),
             schedule = null,
             appointmentDate = date.atTime(time).atZone(zoneId).toInstant(),
             status = AppointmentStatus.CONFIRMED, // Walk-in is automatically confirmed
@@ -1175,11 +1173,11 @@ class AppointmentService(
             patientName =
                 patient?.fullName,
 
-            serviceId =
-                specialty?.id,
+            serviceIds =
+                specialties.mapNotNull { it.id },
 
-            serviceName =
-                specialty?.name,
+            serviceNames =
+                specialties.map { it.name },
 
             scheduleId =
                 schedule?.id,

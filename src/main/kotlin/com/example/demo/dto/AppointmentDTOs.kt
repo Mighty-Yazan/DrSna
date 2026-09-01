@@ -17,8 +17,8 @@ data class AppointmentSummaryResponse(
     val doctorName: String,
     val patientId: UUID?,
     val patientName: String?,
-    val serviceId: UUID?,
-    val serviceName: String?,
+    val serviceIds: List<UUID>,
+    val serviceNames: List<String>,
     val scheduleId: Long?,
     val appointmentAt: OffsetDateTime,
     val createdAt: OffsetDateTime,
@@ -62,8 +62,8 @@ data class BookAppointmentRequest(
     @field:Min(value = 0, message = "Patient age must be a positive number")
     val patientAge: Int,
 
-    @field:NotNull(message = "Service ID is required")
-    val serviceId: UUID,
+    @field:NotNull(message = "Service IDs are required")
+    val serviceIds: List<UUID>,
 
     @field:NotNull(message = "Appointment date and time are required")
     val appointmentAt: LocalDateTime,
@@ -81,7 +81,7 @@ data class BookAppointmentResponse(
     val message: String,
     val patientName: String,
     val patientAge: Int,
-    val serviceName: String,
+    val serviceNames: List<String>,
     val appointmentAt: OffsetDateTime,
     val paymentMethod: String,
     val status: AppointmentStatus

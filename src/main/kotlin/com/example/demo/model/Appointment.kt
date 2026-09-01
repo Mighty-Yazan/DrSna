@@ -32,9 +32,13 @@ class Appointment(
     @JoinColumn(name = "patient_user_id", nullable = true)
     var patient: User? = null,
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "specialty_id")
-    var specialty: Specialty? = null,
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+        name = "appointment_specialties",
+        joinColumns = [JoinColumn(name = "appointment_id")],
+        inverseJoinColumns = [JoinColumn(name = "specialty_id")]
+    )
+    var specialties: MutableList<Specialty> = mutableListOf(),
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "schedule_id")
