@@ -59,8 +59,9 @@ data class BookAppointmentRequest(
     val patientName: String,
 
     @field:NotNull(message = "Patient age is required")
-    @field:Min(value = 0, message = "Patient age must be a positive number")
+    @field:Min(value = 6, message = "Patient must be at least 6 years old")
     val patientAge: Int,
+
 
     @field:NotNull(message = "Service IDs are required")
     val serviceIds: List<UUID>,
