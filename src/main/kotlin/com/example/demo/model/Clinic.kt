@@ -22,8 +22,13 @@ class Clinic(
     @Column(name = "phone_number", length = 10)
     var phoneNumber: String? = null,
 
-    @Column(name = "social_links", columnDefinition = "TEXT")
-    var socialLinks: String? = null,
+    @ElementCollection
+    @CollectionTable(
+        name = "clinic_social_links",
+        joinColumns = [JoinColumn(name = "clinic_id")]
+    )
+    @Column(name = "social_link")
+    var socialLinks: MutableList<String> = mutableListOf(),
 
     @Column(name = "detailed_address", length = 255)
     var detailedAddress: String? = null,

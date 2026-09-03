@@ -40,7 +40,7 @@ data class ClinicDetailsResponse(
     val detailedAddress: String?,
     val phoneNumber: String?,
     val email: String?,
-    val socialLinks: String?,
+    val socialLinks: List<String>,
     val checkingFee: BigDecimal?,
     val description: String?,
     val workingHours: String?,

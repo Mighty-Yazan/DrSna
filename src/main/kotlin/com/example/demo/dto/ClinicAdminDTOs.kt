@@ -20,8 +20,7 @@ data class ClinicProfileRequest(
     @field:Size(max = 10, message = "Phone number must not exceed 10 characters")
     val phoneNumber: String?,
 
-    val socialLinks: String?,
-
+    val socialLinks: List<String>?,
     @field:Size(max = 255, message = "Detailed address must not exceed 255 characters")
     val detailedAddress: String?,
 
@@ -40,7 +39,7 @@ data class ClinicProfileResponse(
     val userId: UUID,
     val clinicName: String,
     val phoneNumber: String?,
-    val socialLinks: String?,
+    val socialLinks: List<String>,
     val detailedAddress: String?,
     val workingHours: String?,
     val checkingFee: BigDecimal?,

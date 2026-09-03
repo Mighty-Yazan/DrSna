@@ -39,7 +39,11 @@ class ClinicAdminService(
         clinic.clinicName = request.clinicName.trim()
         clinic.phoneNumber = request.phoneNumber?.trim()
         clinic.detailedAddress = request.detailedAddress?.trim()
-        clinic.socialLinks = request.socialLinks?.trim()
+        clinic.socialLinks = request.socialLinks
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.toMutableList()
+            ?: mutableListOf()
         clinic.workingHours = request.workingHours?.trim()
         clinic.checkingFee = request.checkingFee
         clinic.description = request.description?.trim()
