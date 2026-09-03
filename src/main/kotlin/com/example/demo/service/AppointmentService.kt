@@ -54,6 +54,9 @@ class AppointmentService(
      */
     @Transactional
     fun bookAppointment(authentication: org.springframework.security.core.Authentication?, request: BookAppointmentRequest): BookAppointmentResponse {
+        if (request.patientAge < 6) {
+            throw AppException("Appointments cannot be booked for patients under 6 years old")
+        }
 
         val date = request.appointmentAt.toLocalDate()
         val time = request.appointmentAt.toLocalTime()
