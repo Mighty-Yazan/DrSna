@@ -21,7 +21,7 @@ class ScheduleAdminService(
     private val appointmentRepository: AppointmentRepository,
     private val userRepository: UserRepository
 ) {
-    private val zoneId = ZoneId.of("Asia/Amman")
+    private val zoneId = ZoneId.of("UTC")
 
     @Transactional
     fun save(clinicEmail: String, request: SaveScheduleRequest): ScheduleResponseDto {

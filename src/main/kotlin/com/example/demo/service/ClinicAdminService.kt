@@ -83,6 +83,11 @@ class ClinicAdminService(
         val clinic = getOrCreateClinic(userEmail)
         val specialty = specialtyRepository.findByNameIgnoreCase(name.trim()) ?: return
         clinicSpecialtyRepository.deleteByClinicIdAndSpecialtyId(clinic.id!!, specialty.id!!)
+        
+        // If no other clinic is using this specialty, completely remove it from the database
+        if (!clinicSpecialtyRepository.existsBySpecialtyId(specialty.id!!)) {
+            specialtyRepository.delete(specialty)
+        }
     }
 
     @Transactional(readOnly = true)
@@ -102,7 +107,7 @@ class ClinicAdminService(
             .filter { doctorId == null || it.doctor?.id == doctorId }
             .filter { rating == null || it.rating == rating }
             .map { review ->
-                ReviewResponse(review.id!!, review.appointment!!.id!!, review.patient!!.id!!, review.patient!!.fullName, review.doctor!!.id!!, review.doctor!!.fullName, review.rating, review.comment, review.reply, review.replyAt?.atZone(java.time.ZoneId.of("Asia/Amman"))?.toOffsetDateTime(), review.createdAt.atZone(java.time.ZoneId.of("Asia/Amman")).toOffsetDateTime())
+                ReviewResponse(review.id!!, review.appointment!!.id!!, review.patient!!.id!!, review.patient!!.fullName, review.doctor!!.id!!, review.doctor!!.fullName, review.rating, review.comment, review.reply, review.replyAt?.atZone(java.time.ZoneId.of("UTC"))?.toOffsetDateTime(), review.createdAt.atZone(java.time.ZoneId.of("UTC")).toOffsetDateTime())
             }.toList()
     }
 
@@ -114,7 +119,7 @@ class ClinicAdminService(
         review.reply = request.reply.trim()
         review.replyAt = java.time.Instant.now()
         val saved = reviewRepository.save(review)
-        return ReviewResponse(saved.id!!, saved.appointment!!.id!!, saved.patient!!.id!!, saved.patient!!.fullName, saved.doctor!!.id!!, saved.doctor!!.fullName, saved.rating, saved.comment, saved.reply, saved.replyAt?.atZone(java.time.ZoneId.of("Asia/Amman"))?.toOffsetDateTime(), saved.createdAt.atZone(java.time.ZoneId.of("Asia/Amman")).toOffsetDateTime())
+        return ReviewResponse(saved.id!!, saved.appointment!!.id!!, saved.patient!!.id!!, saved.patient!!.fullName, saved.doctor!!.id!!, saved.doctor!!.fullName, saved.rating, saved.comment, saved.reply, saved.replyAt?.atZone(java.time.ZoneId.of("UTC"))?.toOffsetDateTime(), saved.createdAt.atZone(java.time.ZoneId.of("UTC")).toOffsetDateTime())
     }
 
     // ── DOCTORS MANAGEMENT ──────────────────────────────────────────────

@@ -65,6 +65,11 @@ class GlobalExceptionHandler {
         return buildResponse(HttpStatus.BAD_REQUEST, ex.message ?: "Invalid request", request)
     }
 
+    @ExceptionHandler(IllegalArgumentException::class)
+    fun handleIllegalArgumentException(ex: IllegalArgumentException, request: HttpServletRequest): ResponseEntity<ApiErrorResponse> {
+        return buildResponse(HttpStatus.BAD_REQUEST, ex.message ?: "Invalid arguments provided", request)
+    }
+
     // 7. Catch-all for unexpected errors
     @ExceptionHandler(Exception::class)
     fun handleAllOtherExceptions(ex: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorResponse> {

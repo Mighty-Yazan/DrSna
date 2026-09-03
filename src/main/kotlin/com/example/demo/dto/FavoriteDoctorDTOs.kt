@@ -10,7 +10,7 @@ data class AddFavoriteDoctorRequest(
 )
 
 data class FavoriteDoctorResponse(
-    val id: UUID,
+    val doctorId: UUID,
     val doctorName: String,
     val clinicName: String?,
     val specialties: String?,

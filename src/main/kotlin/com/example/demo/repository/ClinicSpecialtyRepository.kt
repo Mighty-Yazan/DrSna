@@ -10,5 +10,6 @@ import java.util.UUID
 interface ClinicSpecialtyRepository : JpaRepository<ClinicSpecialty, ClinicSpecialtyId> {
     fun findAllByClinicId(clinicId: UUID): List<ClinicSpecialty>
     fun existsByClinicIdAndSpecialtyId(clinicId: UUID, specialtyId: UUID): Boolean
+    fun existsBySpecialtyId(specialtyId: UUID): Boolean
     fun deleteByClinicIdAndSpecialtyId(clinicId: UUID, specialtyId: UUID)
 }

@@ -24,7 +24,7 @@ class PatientService(
     private val reviewRepository: ReviewRepository,
     private val favoriteDoctorRepository: FavoriteDoctorRepository
 ) {
-    private val zoneId = ZoneId.of("Asia/Amman")
+    private val zoneId = ZoneId.of("UTC")
 
     @Transactional(readOnly = true)
     fun searchClinics(
@@ -613,7 +613,7 @@ class PatientService(
             } else null
             
             FavoriteDoctorResponse(
-                id = fav.id!!,
+                doctorId = doctor.id!!,
                 doctorName = doctor.fullName,
                 clinicName = clinic?.clinicName ?: clinicUser?.fullName,
                 specialties = specialties,

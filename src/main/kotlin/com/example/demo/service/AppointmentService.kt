@@ -40,7 +40,7 @@ class AppointmentService(
 
 ) {
 
-    private val zoneId = ZoneId.of("Asia/Amman")
+    private val zoneId = ZoneId.of("UTC")
 
     // ============================================================
     // DOHA — APPOINTMENT FORM BOOKING

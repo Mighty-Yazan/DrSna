@@ -138,24 +138,27 @@ class AuthService(
             .orElseThrow { ResourceNotFoundException("User not found with email: $email") }
 
         user.fullName = request.fullName.trim()
-        request.city?.let { user.city = it }
+        user.city = request.city
 
-        if (!request.password.isNullOrBlank()) {
-            if (request.password != request.confirmPassword) {
+        if (!passwordEncoder.matches(request.currentPassword, user.password)) {
+            throw IllegalArgumentException("Incorrect current password")
+        }
+
+        if (!request.newPassword.isNullOrBlank()) {
+            if (request.newPassword != request.confirmPassword) {
                 throw PasswordMismatchException()
             }
-            user.password = passwordEncoder.encode(request.password)!!
+            user.password = passwordEncoder.encode(request.newPassword)!!
         }
 
-        request.email?.let { newEmail ->
-            val email = newEmail.trim().lowercase()
+        val newEmail = request.email.trim().lowercase()
 
-            if (email != user.email && userRepository.existsByEmail(email)) {
-                throw IllegalArgumentException("Email is already in use")
-            }
-
-            user.email = email
+        if (newEmail != user.email && userRepository.existsByEmail(newEmail)) {
+            throw IllegalArgumentException("Email is already in use")
         }
+
+        user.email = newEmail
+        
         val savedUser = userRepository.save(user)
 
         return UserProfileResponse(

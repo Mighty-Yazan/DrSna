@@ -17,7 +17,10 @@ data class UpdateProfileRequest(
 
     val city: City,
 
-    val password: String? = null,
+    @field:NotBlank(message = "Current password is required to save changes")
+    val currentPassword: String,
+
+    val newPassword: String? = null,
 
     val confirmPassword: String? = null
 )
