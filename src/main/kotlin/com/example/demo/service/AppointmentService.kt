@@ -104,7 +104,6 @@ class AppointmentService(
 
         // 3. Build booking key & check for duplicate slot upfront
         val bookingKey = buildBookingKey(doctorUser.id!!, appointmentInstant)
-
         if (appointmentRepository.existsByBookingKey(bookingKey)) {
             throw DuplicateResourceException(
                 "The selected appointment slot has already been booked. Please choose another time."

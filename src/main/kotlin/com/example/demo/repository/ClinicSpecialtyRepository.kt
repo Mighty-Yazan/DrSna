@@ -12,4 +12,5 @@ interface ClinicSpecialtyRepository : JpaRepository<ClinicSpecialty, ClinicSpeci
     fun existsByClinicIdAndSpecialtyId(clinicId: UUID, specialtyId: UUID): Boolean
     fun existsBySpecialtyId(specialtyId: UUID): Boolean
     fun deleteByClinicIdAndSpecialtyId(clinicId: UUID, specialtyId: UUID)
+    fun deleteAllByClinicId(clinicId: UUID)
 }

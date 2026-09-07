@@ -5,6 +5,8 @@ import com.example.demo.exception.DuplicateResourceException
 import com.example.demo.exception.InvalidCredentialsException
 import com.example.demo.exception.PasswordMismatchException
 import com.example.demo.exception.ResourceNotFoundException
+import com.example.demo.model.Clinic
+import com.example.demo.model.ClinicApplicationStatus
 import com.example.demo.model.Role
 import com.example.demo.model.User
 import com.example.demo.repository.UserRepository
@@ -80,9 +82,10 @@ class AuthService(
         val savedUser = userRepository.save(newUser)
 
         clinicRepository.save(
-            com.example.demo.model.Clinic(
+            Clinic(
                 user = savedUser,
-                clinicName = savedUser.fullName
+                clinicName = savedUser.fullName,
+                applicationStatus = ClinicApplicationStatus.PENDING
             )
         )
 
