@@ -43,5 +43,9 @@ class Clinic(
     var rating: BigDecimal = BigDecimal.valueOf(0.0),
 
     @Column(columnDefinition = "TEXT")
-    var description: String? = null
+    var description: String? = null,
+
+    @Column(name = "commission_rate", precision = 5, scale = 4)
+    var commissionRate: BigDecimal = BigDecimal("0.10")
+
 )
