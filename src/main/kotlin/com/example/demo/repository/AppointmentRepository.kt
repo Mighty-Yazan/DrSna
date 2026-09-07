@@ -5,6 +5,9 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.stereotype.Repository
 import java.time.Instant
 import java.util.UUID
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
+import com.example.demo.model.AppointmentStatus
 
 @Repository
 interface AppointmentRepository : JpaRepository<Appointment, UUID> {
@@ -69,4 +72,46 @@ interface AppointmentRepository : JpaRepository<Appointment, UUID> {
         from: Instant
     ): List<Appointment>
     fun deleteAllByDoctor_Id(doctorId: UUID)
+
+    // دالة حساب أعداد الحجوزات غير الملغاة بين تاريخين
+    @Query("""
+        SELECT COUNT(a) 
+        FROM Appointment a 
+        WHERE a.appointmentDate >= :startDate 
+          AND a.appointmentDate <= :endDate 
+          AND a.status != com.example.demo.model.AppointmentStatus.CANCELLED
+    """)
+    fun countAppointmentsBetweenDates(
+        @Param("startDate") startDate: Instant,
+        @Param("endDate") endDate: Instant
+    ): Long
+
+    // دالة حساب عدد الحجوزات المكتملة بين تاريخين
+    @Query("""
+        SELECT COUNT(a) 
+        FROM Appointment a 
+        WHERE a.appointmentDate >= :startDate 
+          AND a.appointmentDate <= :endDate 
+          AND a.status = com.example.demo.model.AppointmentStatus.COMPLETED
+    """)
+    fun countCompletedAppointmentsBetweenDates(
+        @Param("startDate") startDate: Instant,
+        @Param("endDate") endDate: Instant
+    ): Long
+
+    // أضيفي هذه الدالة في AppointmentRepository
+    @Query("""
+        SELECT a 
+        FROM Appointment a 
+        JOIN FETCH a.clinic c 
+        WHERE a.appointmentDate >= :startDate 
+          AND a.appointmentDate <= :endDate 
+          AND a.status = com.example.demo.model.AppointmentStatus.COMPLETED
+    """)
+    fun findAllCompletedAppointmentsBetweenDates(
+        @Param("startDate") startDate: java.time.Instant,
+        @Param("endDate") endDate: java.time.Instant
+    ): List<Appointment>
+
+    fun findAllByStatus(status: AppointmentStatus): List<Appointment>
 }
