@@ -23,7 +23,8 @@ class ClinicAdminService(
     private val clinicSpecialtyRepository: ClinicSpecialtyRepository,
     private val reviewRepository: ReviewRepository,
     private val appointmentRepository: AppointmentRepository,
-    private val scheduleRepository: ScheduleRepository
+    private val scheduleRepository: ScheduleRepository,
+    private val insuranceCompanyRepository: InsuranceCompanyRepository
 ) {
     // ── CLINIC PROFILE ──────────────────────────────────────────────────
 
@@ -124,6 +125,34 @@ class ClinicAdminService(
             specialty.id!!,
             specialty.name,
             saved.durationMinutes
+        )
+    }
+
+    @Transactional(readOnly = true)
+    fun getInsuranceCompanies(userEmail: String): List<InsuranceCompanyResponse> {
+        val clinic = getOrCreateClinic(userEmail)
+        return insuranceCompanyRepository
+            .findAllByClinicIdOrderByNameAsc(clinic.id!!)
+            .map { InsuranceCompanyResponse(it.id!!, it.name) }
+    }
+
+    fun addInsuranceCompany(
+        userEmail: String,
+        request: InsuranceCompanyRequest
+    ): InsuranceCompanyResponse {
+        val clinic = getOrCreateClinic(userEmail)
+        val name = request.name.trim()
+
+        val insuranceCompany = insuranceCompanyRepository.save(
+            InsuranceCompany(
+                clinic = clinic,
+                name = name
+            )
+        )
+
+        return InsuranceCompanyResponse(
+            id = insuranceCompany.id!!,
+            name = insuranceCompany.name
         )
     }
 
@@ -275,7 +304,7 @@ class ClinicAdminService(
         scheduleRepository.deleteAllByDoctor_Id(doctorUserId)
 
         /*
-         * Then delete the actual user record from the database, 
+         * Then delete the actual user record from the database,
          * as requested by the frontend team.
          */
         userRepository.deleteById(doctorUserId)
@@ -308,7 +337,8 @@ class ClinicAdminService(
         checkingFee = this.checkingFee,
         rating = this.rating,
         description = this.description,
-        city = this.user?.city ?: throw IllegalStateException("Clinic missing linked user city")
+        city = this.user?.city ?: throw IllegalStateException("Clinic missing linked user city"),
+        applicationStatus = this.applicationStatus
     )
 
 

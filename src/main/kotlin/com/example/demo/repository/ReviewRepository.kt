@@ -11,4 +11,5 @@ interface ReviewRepository : JpaRepository<Review, UUID> {
     fun findAllByClinicId(clinicId: UUID): List<Review>
     fun findAllByClinicIdOrderByCreatedAtDesc(clinicId: UUID): List<Review>
     fun findAllByDoctorIdAndRating(doctorId: UUID, rating: Int): List<Review>
+    fun deleteAllByClinicId(clinicId: UUID)
 }

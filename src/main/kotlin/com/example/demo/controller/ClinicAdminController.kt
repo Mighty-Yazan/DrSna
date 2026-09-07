@@ -35,6 +35,20 @@ class ClinicAdminController(
 
 
 
+    @GetMapping("/insurance-companies")
+    fun getInsuranceCompanies(
+        authentication: Authentication
+    ): ResponseEntity<List<InsuranceCompanyResponse>> =
+        ResponseEntity.ok(clinicAdminService.getInsuranceCompanies(authentication.name))
+
+    @PostMapping("/insurance-companies")
+    fun addInsuranceCompany(
+        authentication: Authentication,
+        @Valid @RequestBody request: InsuranceCompanyRequest
+    ): ResponseEntity<InsuranceCompanyResponse> =
+        ResponseEntity.status(HttpStatus.CREATED)
+            .body(clinicAdminService.addInsuranceCompany(authentication.name, request))
+
     @GetMapping("/reviews")
     fun getReviews(
         authentication: Authentication,

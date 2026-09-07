@@ -2,6 +2,7 @@ package com.example.demo.model
 
 import jakarta.persistence.*
 import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 
 @Entity
@@ -23,10 +24,7 @@ class Clinic(
     var phoneNumber: String? = null,
 
     @ElementCollection
-    @CollectionTable(
-        name = "clinic_social_links",
-        joinColumns = [JoinColumn(name = "clinic_id")]
-    )
+    @CollectionTable(name = "clinic_social_links", joinColumns = [JoinColumn(name = "clinic_id")])
     @Column(name = "social_link")
     var socialLinks: MutableList<String> = mutableListOf(),
 
@@ -43,5 +41,34 @@ class Clinic(
     var rating: BigDecimal = BigDecimal.valueOf(0.0),
 
     @Column(columnDefinition = "TEXT")
-    var description: String? = null
-)
+    var description: String? = null,
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "application_status", nullable = false, length = 20)
+    var applicationStatus: ClinicApplicationStatus = ClinicApplicationStatus.PENDING,
+
+    @Column(name = "brand", length = 150)
+    var brand: String? = null,
+
+    @Column(name = "branch_count", nullable = false)
+    var branchCount: Int = 1,
+
+    @Column(name = "currency", length = 10)
+    var currency: String? = "JOD",
+
+    @Column(name = "tax_registration", length = 100)
+    var taxRegistration: String? = null,
+
+    @Column(name = "commission_rate", precision = 7, scale = 4, nullable = false)
+    var commissionRate: BigDecimal = BigDecimal.ZERO,
+
+    @Column(name = "overridden_commission_rate", precision = 7, scale = 4)
+    var overriddenCommissionRate: BigDecimal? = null,
+
+    @Column(name = "rejection_reason", columnDefinition = "TEXT")
+    var rejectionReason: String? = null
+) {
+    fun effectiveCommissionRate(): BigDecimal = overriddenCommissionRate ?: commissionRate
+
+    fun submittedAt(): Instant = user?.createdAt ?: Instant.EPOCH
+}

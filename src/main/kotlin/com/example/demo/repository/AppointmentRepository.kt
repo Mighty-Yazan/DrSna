@@ -9,16 +9,8 @@ import java.util.UUID
 @Repository
 interface AppointmentRepository : JpaRepository<Appointment, UUID> {
 
-    /*
-     * Used to prevent two active appointments from occupying
-     * the same doctor/time slot.
-     */
     fun existsByBookingKey(bookingKey: String): Boolean
 
-    /*
-     * Used when rescheduling an existing appointment.
-     * The current appointment itself must be ignored.
-     */
     fun existsByBookingKeyAndIdNot(
         bookingKey: String,
         id: UUID
@@ -68,5 +60,29 @@ interface AppointmentRepository : JpaRepository<Appointment, UUID> {
         clinicId: UUID,
         from: Instant
     ): List<Appointment>
-    fun deleteAllByDoctor_Id(doctorId: UUID)
+
+    fun findAllByAppointmentDateBetween(
+        from: Instant,
+        to: Instant
+    ): List<Appointment>
+
+    /*
+     * Delete all appointments belonging to a specific clinic.
+     *
+     * Used when permanently removing a clinic.
+     */
+    fun deleteAllByClinic_Id(
+        clinicId: UUID
+    )
+
+    /*
+     * Delete all appointments belonging to a specific doctor.
+     *
+     * Used when permanently removing a doctor
+     * after the doctor is no longer associated
+     * with any clinic.
+     */
+    fun deleteAllByDoctor_Id(
+        doctorId: UUID
+    )
 }
