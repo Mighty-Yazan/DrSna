@@ -60,6 +60,20 @@ class ClinicAdminController(
     ): ResponseEntity<SpecialtyResponse> =
         ResponseEntity.status(HttpStatus.CREATED).body(clinicAdminService.addSpecialty(authentication.name, request))
 
+    @PutMapping("/specialties/{specialtyId}/duration")
+    fun updateSpecialtyDuration(
+        authentication: Authentication,
+        @PathVariable specialtyId: UUID,
+        @Valid @RequestBody request: UpdateSpecialtyDurationRequest
+    ): ResponseEntity<SpecialtyResponse> =
+        ResponseEntity.ok(
+            clinicAdminService.updateSpecialtyDuration(
+                authentication.name,
+                specialtyId,
+                request
+            )
+        )
+
     @DeleteMapping("/specialties/{name}")
     fun removeSpecialty(
         authentication: Authentication,

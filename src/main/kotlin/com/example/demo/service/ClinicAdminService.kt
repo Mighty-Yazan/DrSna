@@ -75,11 +75,12 @@ class ClinicAdminService(
                 ClinicSpecialty(
                     id = ClinicSpecialtyId(clinicId, specialtyId),
                     clinic = clinic,
-                    specialty = specialty
+                    specialty = specialty,
+                    durationMinutes = request.durationMinutes
                 )
             )
         }
-        return SpecialtyResponse(specialtyId, specialty.name)
+        return SpecialtyResponse(specialtyId, specialty.name, request.durationMinutes)
     }
 
     @Transactional
@@ -87,7 +88,7 @@ class ClinicAdminService(
         val clinic = getOrCreateClinic(userEmail)
         val specialty = specialtyRepository.findByNameIgnoreCase(name.trim()) ?: return
         clinicSpecialtyRepository.deleteByClinicIdAndSpecialtyId(clinic.id!!, specialty.id!!)
-        
+
         // If no other clinic is using this specialty, completely remove it from the database
         if (!clinicSpecialtyRepository.existsBySpecialtyId(specialty.id!!)) {
             specialtyRepository.delete(specialty)
@@ -99,8 +100,31 @@ class ClinicAdminService(
         val clinic = getOrCreateClinic(userEmail)
         return clinicSpecialtyRepository.findAllByClinicId(clinic.id!!).mapNotNull {
             val specialty = it.specialty ?: return@mapNotNull null
-            SpecialtyResponse(specialty.id!!, specialty.name)
+            SpecialtyResponse(specialty.id!!, specialty.name, it.durationMinutes)
         }
+    }
+
+    fun updateSpecialtyDuration(
+        userEmail: String,
+        specialtyId: UUID,
+        request: UpdateSpecialtyDurationRequest
+    ): SpecialtyResponse {
+        val clinic = getOrCreateClinic(userEmail)
+
+        val relation = clinicSpecialtyRepository.findAllByClinicId(clinic.id!!)
+            .firstOrNull { it.specialty?.id == specialtyId }
+            ?: throw ResourceNotFoundException("Service is not associated with this clinic")
+
+        relation.durationMinutes = request.durationMinutes
+        val saved = clinicSpecialtyRepository.save(relation)
+        val specialty = saved.specialty
+            ?: throw ResourceNotFoundException("Service not found")
+
+        return SpecialtyResponse(
+            specialty.id!!,
+            specialty.name,
+            saved.durationMinutes
+        )
     }
 
     @Transactional(readOnly = true)
@@ -243,7 +267,7 @@ class ClinicAdminService(
         clinicDoctorRepository.deleteById(
             clinicDoctorId
         )
-        
+
         /*
          * Delete all appointments and schedules associated with the doctor
          */

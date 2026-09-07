@@ -47,6 +47,15 @@ class Appointment(
     @Column(name = "appointment_date", nullable = false)
     var appointmentDate: Instant? = null,
 
+    /*
+     * Duration of the booked appointment in minutes.
+     * This is copied from the selected clinic service(s) at booking time
+     * so historical appointments keep their original duration even if
+     * the clinic changes the service duration later.
+     */
+    @Column(name = "duration_minutes", nullable = false)
+    var durationMinutes: Int = 15,
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     var status: AppointmentStatus = AppointmentStatus.PENDING,

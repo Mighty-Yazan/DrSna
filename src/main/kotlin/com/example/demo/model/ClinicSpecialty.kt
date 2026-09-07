@@ -15,5 +15,13 @@ data class ClinicSpecialtyId(
 class ClinicSpecialty(
     @EmbeddedId var id: ClinicSpecialtyId = ClinicSpecialtyId(),
     @ManyToOne(fetch = FetchType.LAZY) @MapsId("clinicId") @JoinColumn(name = "clinic_id") var clinic: Clinic? = null,
-    @ManyToOne(fetch = FetchType.LAZY) @MapsId("specialtyId") @JoinColumn(name = "specialty_id") var specialty: Specialty? = null
+    @ManyToOne(fetch = FetchType.LAZY) @MapsId("specialtyId") @JoinColumn(name = "specialty_id") var specialty: Specialty? = null,
+
+    /*
+     * Duration of this service for this specific clinic.
+     * Stored on the clinic-service relation because the same service
+     * can have a different duration in different clinics.
+     */
+    @Column(name = "duration_minutes", nullable = false)
+    var durationMinutes: Int = 60
 )
