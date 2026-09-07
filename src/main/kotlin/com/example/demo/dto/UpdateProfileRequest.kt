@@ -15,6 +15,9 @@ data class UpdateProfileRequest(
     @field:NotBlank(message = "Email is required")
     val email: String,
 
+    @field:Size(max = 20, message = "Phone number must not exceed 20 characters")
+    val phoneNumber: String? = null,
+
     val city: City,
 
     @field:NotBlank(message = "Current password is required to save changes")

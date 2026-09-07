@@ -96,6 +96,7 @@ data class UserProfileResponse(
     val userId: UUID?,
     val fullName: String,
     val email: String,
+    val phoneNumber: String? = null,
     val city: City,
     val role: Role,
     val clinicLicenseNumber: String? = null,

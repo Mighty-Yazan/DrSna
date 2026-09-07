@@ -39,9 +39,10 @@ class PatientController(private val patientService: PatientService) {
     fun availability(
         @PathVariable clinicId: UUID,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) date: LocalDate,
-        @RequestParam(required = false) doctorId: UUID?
+        @RequestParam(required = false) doctorId: UUID?,
+        @RequestParam serviceId: UUID
     ): ResponseEntity<List<AvailabilitySlotResponse>> =
-        ResponseEntity.ok(patientService.getAvailability(clinicId, date, doctorId))
+        ResponseEntity.ok(patientService.getAvailability(clinicId, date, doctorId, serviceId))
 
     @PostMapping("/reviews")
     fun createReview(authentication: Authentication, @Valid @RequestBody request: CreateReviewRequest): ResponseEntity<ReviewResponse> =

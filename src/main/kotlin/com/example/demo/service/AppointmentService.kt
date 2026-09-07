@@ -36,7 +36,8 @@ class AppointmentService(
     private val clinicRepository: ClinicRepository,
     private val clinicDoctorRepository: ClinicDoctorRepository,
     private val scheduleRepository: ScheduleRepository,
-    private val specialtyRepository: SpecialtyRepository
+    private val specialtyRepository: SpecialtyRepository,
+    private val clinicSpecialtyRepository: com.example.demo.repository.ClinicSpecialtyRepository
 
 ) {
 
@@ -78,9 +79,23 @@ class AppointmentService(
         val doctorUser = userRepository.findById(request.doctorId)
             .orElseThrow { ResourceNotFoundException("Doctor with ID '${request.doctorId}' was not found") }
 
-        val specialtiesList = specialtyRepository.findAllById(request.serviceIds)
-        if (specialtiesList.isEmpty()) {
-            throw ResourceNotFoundException("No valid specialties found for the provided IDs")
+        val serviceIds = request.serviceIds.distinct()
+        val specialtiesList = specialtyRepository.findAllById(serviceIds)
+        if (specialtiesList.size != serviceIds.size) {
+            throw ResourceNotFoundException("One or more selected services were not found")
+        }
+
+        val clinicServiceRelations = clinicSpecialtyRepository
+            .findAllByClinicId(request.clinicId)
+            .filter { it.specialty?.id in serviceIds }
+
+        if (clinicServiceRelations.size != serviceIds.size) {
+            throw AppException("One or more selected services are not available at this clinic")
+        }
+
+        val totalDurationMinutes = clinicServiceRelations.sumOf { it.durationMinutes }
+        if (totalDurationMinutes <= 0) {
+            throw AppException("Selected service duration must be greater than zero")
         }
 
         val patientUser = authentication?.name?.let { email ->
@@ -89,8 +104,27 @@ class AppointmentService(
 
         // 3. Build booking key & check for duplicate slot upfront
         val bookingKey = buildBookingKey(doctorUser.id!!, appointmentInstant)
+
         if (appointmentRepository.existsByBookingKey(bookingKey)) {
-            throw DuplicateResourceException("The selected appointment slot has already been booked. Please choose another time.")
+            throw DuplicateResourceException(
+                "The selected appointment slot has already been booked. Please choose another time."
+            )
+        }
+
+        if (time.minute % 15 != 0 || time.second != 0 || time.nano != 0) {
+            throw AppException("Appointments must start on a 15-minute slot")
+        }
+
+        val from = date.atStartOfDay(zoneId).toInstant()
+        val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
+        val existingAppointments = appointmentRepository
+            .findAllByDoctorIdAndAppointmentDateBetween(request.doctorId, from, to)
+            .filter { it.status != AppointmentStatus.CANCELLED }
+
+        if (hasAppointmentOverlap(existingAppointments, appointmentInstant, totalDurationMinutes)) {
+            throw DuplicateResourceException(
+                "The selected appointment time overlaps with an existing appointment"
+            )
         }
 
         // 4. Build Appointment entity
@@ -102,6 +136,7 @@ class AppointmentService(
             formPatientAge  = request.patientAge,
             specialties     = specialtiesList.toMutableList(),
             appointmentDate = appointmentInstant,
+            durationMinutes = totalDurationMinutes,
             paymentMethod   = request.paymentMethod,
             status          = AppointmentStatus.PENDING,
             bookingKey      = bookingKey
@@ -489,6 +524,7 @@ class AppointmentService(
             specialties = mutableListOf(),
             schedule = null,
             appointmentDate = date.atTime(time).atZone(zoneId).toInstant(),
+            durationMinutes = 15,
             status = AppointmentStatus.CONFIRMED, // Walk-in is automatically confirmed
             bookingKey = null
         )
@@ -500,6 +536,18 @@ class AppointmentService(
 
         if (appointmentRepository.existsByBookingKey(newBookingKey)) {
             throw DuplicateResourceException("The selected appointment slot is already booked")
+        }
+
+        val from = date.atStartOfDay(zoneId).toInstant()
+        val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
+        val existingAppointments = appointmentRepository
+            .findAllByDoctorIdAndAppointmentDateBetween(doctorUser.id!!, from, to)
+            .filter { it.status != AppointmentStatus.CANCELLED }
+
+        if (hasAppointmentOverlap(existingAppointments, newInstant, appointment.durationMinutes, appointment.id)) {
+            throw DuplicateResourceException(
+                "The selected appointment time overlaps with an existing appointment"
+            )
         }
 
         appointment.bookingKey = newBookingKey
@@ -715,6 +763,28 @@ class AppointmentService(
         ) {
             throw DuplicateResourceException(
                 "The selected appointment slot is already booked"
+            )
+        }
+
+        val from = newDate.atStartOfDay(zoneId).toInstant()
+        val to = newDate.plusDays(1).atStartOfDay(zoneId).toInstant()
+        val existingAppointments = appointmentRepository
+            .findAllByDoctorIdAndAppointmentDateBetween(
+                appointment.doctor!!.id!!,
+                from,
+                to
+            )
+            .filter { it.status != AppointmentStatus.CANCELLED }
+
+        if (hasAppointmentOverlap(
+                existingAppointments,
+                newInstant,
+                appointment.durationMinutes,
+                appointment.id
+            )
+        ) {
+            throw DuplicateResourceException(
+                "The selected appointment time overlaps with an existing appointment"
             )
         }
 
@@ -962,12 +1032,12 @@ class AppointmentService(
         requireDateNotPast(date)
 
         if (
-            time.minute != 0 ||
+            time.minute % 15 != 0 ||
             time.second != 0 ||
             time.nano != 0
         ) {
             throw AppException(
-                "Appointments must start on a 60-minute slot (top of the hour)"
+                "Appointments must start on a 15-minute slot"
             )
         }
 
@@ -1013,7 +1083,10 @@ class AppointmentService(
         }
 
         // Validate time is within clinic opening hours
-        if (time.isBefore(clinicDaySchedule.startTime) || time.plusMinutes(60).isAfter(clinicDaySchedule.endTime)) {
+        if (
+            time.isBefore(clinicDaySchedule.startTime) ||
+            time.plusMinutes(appointment.durationMinutes.toLong()).isAfter(clinicDaySchedule.endTime)
+        ) {
             throw AppException("Selected time is outside the clinic's operating hours (${clinicDaySchedule.startTime} - ${clinicDaySchedule.endTime})")
         }
 
@@ -1065,7 +1138,8 @@ class AppointmentService(
             !isValidSlot(
                 start,
                 end,
-                time
+                time,
+                appointment.durationMinutes
             )
         ) {
             throw AppException(
@@ -1094,14 +1168,40 @@ class AppointmentService(
     private fun isValidSlot(
         start: LocalTime,
         end: LocalTime,
-        time: LocalTime
+        time: LocalTime,
+        durationMinutes: Int
     ): Boolean {
 
         return !time.isBefore(start) &&
-                !time.plusMinutes(60).isAfter(end) &&
-                time.minute == 0 &&
+                time.minute % 15 == 0 &&
                 time.second == 0 &&
-                time.nano == 0
+                time.nano == 0 &&
+                !time.plusMinutes(durationMinutes.toLong()).isAfter(end)
+    }
+
+    private fun hasAppointmentOverlap(
+        appointments: List<Appointment>,
+        newStart: Instant,
+        newDurationMinutes: Int,
+        ignoreAppointmentId: UUID? = null
+    ): Boolean {
+        val newEnd = newStart.plusSeconds(newDurationMinutes.toLong() * 60)
+
+        return appointments.any { existing ->
+            if (existing.status == AppointmentStatus.CANCELLED) {
+                return@any false
+            }
+
+            if (ignoreAppointmentId != null && existing.id == ignoreAppointmentId) {
+                return@any false
+            }
+
+            val existingStart = existing.appointmentDate ?: return@any false
+            val existingDuration = existing.durationMinutes.coerceAtLeast(1)
+            val existingEnd = existingStart.plusSeconds(existingDuration.toLong() * 60)
+
+            newStart.isBefore(existingEnd) && newEnd.isAfter(existingStart)
+        }
     }
 
     // ============================================================

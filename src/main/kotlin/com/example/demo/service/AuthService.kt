@@ -126,6 +126,7 @@ class AuthService(
             userId = user.id,
             fullName = user.fullName,
             email = user.email,
+            phoneNumber = user.phoneNumber,
             city = user.city,
             role = user.role,
             clinicLicenseNumber = user.clinicLicenseNumber
@@ -158,13 +159,14 @@ class AuthService(
         }
 
         user.email = newEmail
-        
+
         val savedUser = userRepository.save(user)
 
         return UserProfileResponse(
             userId = savedUser.id,
             fullName = savedUser.fullName,
             email = savedUser.email,
+            phoneNumber = savedUser.phoneNumber,
             city = savedUser.city,
             role = savedUser.role,
             clinicLicenseNumber = savedUser.clinicLicenseNumber
