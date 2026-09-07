@@ -17,3 +17,10 @@ spring:
 
 jwt:
   secret: ${JWT_SECRET:DrSnaClinicSuperSecretKeyForJwtTokens2026!!}
+
+admin:
+  seed:
+    full-name: ${ADMIN_SEED_FULL_NAME:System Administrator}
+    email: ${ADMIN_SEED_EMAIL:drsna.admin@email.com}
+    password: ${ADMIN_SEED_PASSWORD:Admin123!}
+    city: ${ADMIN_SEED_CITY:AMMAN}

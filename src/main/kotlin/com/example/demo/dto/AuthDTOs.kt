@@ -62,6 +62,30 @@ data class ClinicRegisterRequest(
     val confirmPassword: String
 )
 
+data class AdminRegisterRequest(
+    @field:NotBlank(message = "Full name is required")
+    @field:Size(min = 2, message = "Full name must be at least 2 characters")
+    val fullName: String,
+
+    @field:NotBlank(message = "Email is required")
+    @field:Email(message = "Email must be a valid email address")
+    val email: String,
+
+    @field:NotNull(message = "City is required")
+    val city: City,
+
+    @field:NotBlank(message = "Password is required")
+    @field:Size(min = 8, max = 12, message = "Password must be between 8 and 12 characters")
+    @field:Pattern(
+        regexp = "^(?=.*[0-9])(?=.*[^a-zA-Z0-9]).+$",
+        message = "Password must contain at least one number and one special character"
+    )
+    val password: String,
+
+    @field:NotBlank(message = "Confirm password is required")
+    val confirmPassword: String
+)
+
 // ── Auth Responses ──────────────────────────────────────────────────
 
 data class AuthResponse(

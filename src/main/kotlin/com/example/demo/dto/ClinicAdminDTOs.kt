@@ -2,7 +2,6 @@ package com.example.demo.dto
 
 import com.example.demo.model.City
 import com.example.demo.model.ClinicApplicationStatus
-import com.example.demo.model.ClinicApplicationStatus
 import com.example.demo.model.Role
 import jakarta.validation.constraints.DecimalMin
 import jakarta.validation.constraints.Email
@@ -107,16 +106,4 @@ data class DoctorResponse(
     val isActive: Boolean = true,
     val bio: String? = null,
     val specialty: String? = null
-)
-
-
-data class InsuranceCompanyRequest(
-    @field:NotBlank(message = "Insurance company name is required")
-    @field:Size(max = 150, message = "Insurance company name must not exceed 150 characters")
-    val name: String
-)
-
-data class InsuranceCompanyResponse(
-    val id: UUID,
-    val name: String
 )

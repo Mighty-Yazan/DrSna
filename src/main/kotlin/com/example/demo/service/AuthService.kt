@@ -97,6 +97,37 @@ class AuthService(
         )
     }
 
+    fun registerAdmin(request: AdminRegisterRequest): AuthResponse {
+        if (request.password != request.confirmPassword) {
+            throw PasswordMismatchException()
+        }
+
+        val normalizedEmail = request.email.trim().lowercase()
+
+        if (userRepository.existsByEmail(normalizedEmail)) {
+            throw DuplicateResourceException(
+                "Email is already registered: $normalizedEmail"
+            )
+        }
+
+        val newAdmin = User(
+            fullName = request.fullName.trim(),
+            email = normalizedEmail,
+            password = passwordEncoder.encode(request.password)!!,
+            city = request.city,
+            role = Role.ADMIN
+        )
+
+        val savedAdmin = userRepository.save(newAdmin)
+
+        return AuthResponse(
+            message = "Admin registered successfully",
+            userId = savedAdmin.id,
+            email = savedAdmin.email,
+            role = savedAdmin.role
+        )
+    }
+
     fun login(request: LoginRequest): LoginResponse {
         val normalizedEmail = request.email.trim().lowercase()
 

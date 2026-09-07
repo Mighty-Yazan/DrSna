@@ -64,4 +64,14 @@ class AuthController(
         }
         return ResponseEntity.ok(MessageResponse("Logged out successfully"))
     }
+
+    @PostMapping("/register/admin")
+    @PreAuthorize("hasRole('ADMIN')")
+    fun registerAdmin(
+        @Valid @RequestBody request: AdminRegisterRequest
+    ): ResponseEntity<AuthResponse> {
+        val response = authService.registerAdmin(request)
+        return ResponseEntity.status(HttpStatus.CREATED).body(response)
+    }
+
 }
