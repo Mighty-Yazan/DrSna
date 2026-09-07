@@ -51,7 +51,12 @@ data class ClinicDetailsResponse(
     val reviews: List<ReviewResponse> = emptyList()
 )
 
-data class ServiceDetailsResponse(val serviceId: Any, val serviceName: String, val description: String?)
+data class ServiceDetailsResponse(
+    val serviceId: Any,
+    val serviceName: String,
+    val description: String?,
+    val durationMinutes: Int
+)
 
 data class DoctorDetailsResponse(
     val doctorId: UUID,
