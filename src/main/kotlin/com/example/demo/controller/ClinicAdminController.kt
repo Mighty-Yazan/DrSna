@@ -10,11 +10,16 @@ import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
 
+import org.springframework.format.annotation.DateTimeFormat
+import java.time.LocalDate
+import com.example.demo.service.PatientService
+
 @RestController
 @RequestMapping("/api/clinic")
 @PreAuthorize("hasRole('CLINIC')")
 class ClinicAdminController(
-    private val clinicAdminService: ClinicAdminService
+    private val clinicAdminService: ClinicAdminService,
+    private val patientService: PatientService
 ) {
     // ── CLINIC PROFILE ENDPOINTS ────────────────────────────────────────
 
@@ -22,6 +27,17 @@ class ClinicAdminController(
     fun getProfile(authentication: Authentication): ResponseEntity<ClinicProfileResponse> {
         val profile = clinicAdminService.getProfile(authentication.name)
         return ResponseEntity.ok(profile)
+    }
+
+    @GetMapping("/availability")
+    fun availability(
+        authentication: Authentication,
+        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) date: LocalDate,
+        @RequestParam(required = false) doctorId: UUID?
+    ): ResponseEntity<List<AvailabilitySlotResponse>> {
+        // Find clinic ID using the logged-in email
+        val profile = clinicAdminService.getProfile(authentication.name)
+        return ResponseEntity.ok(patientService.getAvailability(profile.id, date, doctorId, emptyList()))
     }
 
     @PutMapping("/profile")
@@ -49,6 +65,23 @@ class ClinicAdminController(
         ResponseEntity.status(HttpStatus.CREATED)
             .body(clinicAdminService.addInsuranceCompany(authentication.name, request))
 
+    @PutMapping("/insurance-companies/{insuranceId}")
+    fun updateInsuranceCompany(
+        authentication: Authentication,
+        @PathVariable insuranceId: UUID,
+        @Valid @RequestBody request: InsuranceCompanyRequest
+    ): ResponseEntity<InsuranceCompanyResponse> =
+        ResponseEntity.ok(clinicAdminService.updateInsuranceCompany(authentication.name, insuranceId, request))
+
+    @DeleteMapping("/insurance-companies/{insuranceId}")
+    fun deleteInsuranceCompany(
+        authentication: Authentication,
+        @PathVariable insuranceId: UUID
+    ): ResponseEntity<Void> {
+        clinicAdminService.deleteInsuranceCompany(authentication.name, insuranceId)
+        return ResponseEntity.noContent().build()
+    }
+
     @GetMapping("/reviews")
     fun getReviews(
         authentication: Authentication,
@@ -62,6 +95,10 @@ class ClinicAdminController(
         @PathVariable reviewId: UUID,
         @RequestBody request: ReviewReplyRequest
     ): ResponseEntity<ReviewResponse> = ResponseEntity.ok(clinicAdminService.replyToReview(authentication.name, reviewId, request))
+
+    @GetMapping("/specialties/all")
+    fun getAllSpecialties(): ResponseEntity<List<SpecialtyResponse>> =
+        ResponseEntity.ok(clinicAdminService.getAllSpecialties())
 
     @GetMapping("/specialties")
     fun getSpecialties(authentication: Authentication): ResponseEntity<List<SpecialtyResponse>> =
@@ -94,6 +131,15 @@ class ClinicAdminController(
         @PathVariable name: String
     ): ResponseEntity<Void> {
         clinicAdminService.removeSpecialty(authentication.name, name)
+        return ResponseEntity.noContent().build()
+    }
+
+    @DeleteMapping("/specialties/{name}/permanent")
+    fun deleteSpecialtyPermanently(
+        authentication: Authentication,
+        @PathVariable name: String
+    ): ResponseEntity<Void> {
+        clinicAdminService.deleteSpecialtyPermanently(authentication.name, name)
         return ResponseEntity.noContent().build()
     }
 

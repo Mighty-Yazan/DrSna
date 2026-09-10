@@ -1,10 +1,12 @@
 package com.example.demo.security
 
-import com.nimbusds.jose.jwk.source.ImmutableSecret
+import com.nimbusds.jose.jwk.JWKSet
+import com.nimbusds.jose.jwk.RSAKey
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet
+import com.nimbusds.jose.jwk.source.JWKSource
 import com.nimbusds.jose.proc.SecurityContext
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.security.authentication.AuthenticationManager
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
@@ -19,7 +21,6 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter
 import org.springframework.security.web.SecurityFilterChain
-import javax.crypto.spec.SecretKeySpec
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.CorsConfigurationSource
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource
@@ -28,9 +29,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 @EnableWebSecurity
 @EnableMethodSecurity
 class SecurityConfig(
-    private val tokenBlacklistService: TokenBlacklistService,
-    @Value("\${jwt.secret:DrSnaClinicSuperSecretKeyForJwtTokens2026!!}")
-    private val jwtSecret: String
+    private val rsaKeyProperties: RsaKeyProperties,
+    private val tokenBlacklistService: TokenBlacklistService
 ) {
 
     @Bean
@@ -48,15 +48,14 @@ class SecurityConfig(
                         "/api/auth/register/user",
                         "/api/auth/register/clinic",
                         "/api/auth/login",
-                        "/api/appointments/book"   // DOHA: public appointment form — no auth required
+                        "/api/auth/refresh",       // New endpoint
+                        "/api/appointments/book"
                     ).permitAll()
                     .anyRequest().authenticated()
             }
             .oauth2ResourceServer { oauth2 ->
                 oauth2.jwt { jwt ->
-                    jwt.jwtAuthenticationConverter(
-                        jwtAuthenticationConverter()
-                    )
+                    jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())
                 }
             }
 
@@ -66,37 +65,21 @@ class SecurityConfig(
     @Bean
     fun corsConfigurationSource(): CorsConfigurationSource {
         val configuration = CorsConfiguration()
-
-        configuration.allowedOrigins = listOf(
-            "http://localhost:5173"
-        )
-
-        configuration.allowedMethods = listOf(
-            "GET",
-            "POST",
-            "PUT",
-            "PATCH",
-            "DELETE",
-            "OPTIONS"
-        )
-
+        configuration.allowedOrigins = listOf("http://localhost:5173")
+        configuration.allowedMethods = listOf("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
         configuration.allowedHeaders = listOf("*")
+        configuration.allowCredentials = true // Allow cookies for refresh token
 
         val source = UrlBasedCorsConfigurationSource()
-
-        source.registerCorsConfiguration(
-            "/**",
-            configuration
-        )
-
+        source.registerCorsConfiguration("/**", configuration)
         return source
     }
 
     @Bean
     fun jwtAuthenticationConverter(): JwtAuthenticationConverter {
         val authoritiesConverter = org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter().apply {
-            setAuthoritiesClaimName("role")
-            setAuthorityPrefix("ROLE_")
+            setAuthoritiesClaimName("roles") // Assuming we pass roles array
+            setAuthorityPrefix("") // If we set prefix manually in TokenService
         }
         return JwtAuthenticationConverter().apply {
             setJwtGrantedAuthoritiesConverter(authoritiesConverter)
@@ -105,8 +88,7 @@ class SecurityConfig(
 
     @Bean
     fun jwtDecoder(): JwtDecoder {
-        val secretKey = SecretKeySpec(jwtSecret.toByteArray(), "HmacSHA256")
-        val baseDecoder = NimbusJwtDecoder.withSecretKey(secretKey).build()
+        val baseDecoder = NimbusJwtDecoder.withPublicKey(rsaKeyProperties.publicKey).build()
 
         // Wrap the decoder to check the blacklist after successful decode
         return JwtDecoder { token ->
@@ -121,8 +103,9 @@ class SecurityConfig(
 
     @Bean
     fun jwtEncoder(): JwtEncoder {
-        val secretKey = SecretKeySpec(jwtSecret.toByteArray(), "HmacSHA256")
-        return NimbusJwtEncoder(ImmutableSecret<SecurityContext>(secretKey))
+        val jwk = RSAKey.Builder(rsaKeyProperties.publicKey).privateKey(rsaKeyProperties.privateKey).build()
+        val jwks: JWKSource<SecurityContext> = ImmutableJWKSet(JWKSet(jwk))
+        return NimbusJwtEncoder(jwks)
     }
 
     @Bean

@@ -53,12 +53,34 @@ data class ClinicProfileResponse(
 data class InsuranceCompanyRequest(
     @field:NotBlank(message = "Insurance company name is required")
     @field:Size(max = 150, message = "Insurance company name must not exceed 150 characters")
-    val name: String
+    val name: String,
+    val coverageTier: String? = null,
+    val copay: String? = null,
+    val phone: String? = null,
+    val portalUrl: String? = null,
+    val instantPreApproval: Boolean = false,
+    val network: String? = null,
+    val code: String? = null,
+    val badgeBg: String? = null,
+    val badgeText: String? = null,
+    val directBillingType: String? = null,
+    val status: String? = null
 )
 
 data class InsuranceCompanyResponse(
     val id: UUID,
-    val name: String
+    val name: String,
+    val coverageTier: String?,
+    val copay: String?,
+    val phone: String?,
+    val portalUrl: String?,
+    val instantPreApproval: Boolean,
+    val network: String?,
+    val code: String?,
+    val badgeBg: String?,
+    val badgeText: String?,
+    val directBillingType: String?,
+    val status: String?
 )
 
 

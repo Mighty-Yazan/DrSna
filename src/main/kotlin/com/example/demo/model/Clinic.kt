@@ -44,13 +44,13 @@ class Clinic(
     var description: String? = null,
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "application_status", nullable = false, length = 20)
+    @Column(name = "application_status", nullable = false, length = 20, columnDefinition = "varchar(20) default 'PENDING'")
     var applicationStatus: ClinicApplicationStatus = ClinicApplicationStatus.PENDING,
 
     @Column(name = "brand", length = 150)
     var brand: String? = null,
 
-    @Column(name = "branch_count", nullable = false)
+    @Column(name = "branch_count", nullable = false, columnDefinition = "integer default 1")
     var branchCount: Int = 1,
 
     @Column(name = "currency", length = 10)
@@ -59,7 +59,7 @@ class Clinic(
     @Column(name = "tax_registration", length = 100)
     var taxRegistration: String? = null,
 
-    @Column(name = "commission_rate", precision = 7, scale = 4, nullable = false)
+    @Column(name = "commission_rate", precision = 7, scale = 4, nullable = false, columnDefinition = "numeric(7,4) default 0.0")
     var commissionRate: BigDecimal = BigDecimal.ZERO,
 
     @Column(name = "overridden_commission_rate", precision = 7, scale = 4)

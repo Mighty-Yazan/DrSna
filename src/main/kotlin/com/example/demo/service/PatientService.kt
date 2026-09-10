@@ -134,45 +134,52 @@ class PatientService(
         clinicId: UUID,
         date: LocalDate,
         doctorId: UUID?,
-        serviceId: UUID
+        serviceIds: List<UUID>
     ): List<AvailabilitySlotResponse> {
+        println("[DEBUG-AVAIL] === getAvailability called: clinicId=$clinicId, date=$date, doctorId=$doctorId, serviceIds=$serviceIds ===")
         requireDateNotPast(date)
 
         val clinic = clinicRepository.findById(clinicId)
-            .orElseThrow { ResourceNotFoundException("Clinic not found with ID: $clinicId") }
+            .orElseThrow { ResourceNotFoundException("Clinic not found") }
 
-        val clinicUserId = clinic.user!!.id!!
-        val serviceRelation = clinicSpecialtyRepository.findAllByClinicId(clinicId)
-            .firstOrNull { it.specialty?.id == serviceId }
-            ?: throw ResourceNotFoundException("Service is not associated with the selected clinic")
+        val clinicUserId = clinic.user?.id ?: throw AppException("Clinic user not found")
+        println("[DEBUG-AVAIL] clinicUserId=$clinicUserId")
 
-        val serviceDurationMinutes = serviceRelation.durationMinutes
+        var serviceDurationMinutes = clinicSpecialtyRepository.findAllByClinicId(clinicId)
+            .filter { it.specialty?.id in serviceIds }
+            .sumOf { it.durationMinutes }
+
         if (serviceDurationMinutes <= 0) {
-            throw AppException("Service duration must be greater than zero")
+            serviceDurationMinutes = 15 // Walk-in default
         }
+        println("[DEBUG-AVAIL] serviceDurationMinutes=$serviceDurationMinutes")
 
         val relations = clinicDoctorRepository.findAllByClinic_Id(clinicUserId)
+        println("[DEBUG-AVAIL] Found ${relations.size} doctor relations for clinicUserId=$clinicUserId")
         val doctorRelations = if (doctorId == null) {
             relations
         } else {
             relations.filter { it.doctor?.id == doctorId }
         }
+        println("[DEBUG-AVAIL] doctorRelations count=${doctorRelations.size} (filtered by doctorId=$doctorId)")
 
         if (doctorId != null && doctorRelations.isEmpty()) {
+            println("[DEBUG-AVAIL] ERROR: Doctor not associated with clinic!")
             throw ResourceNotFoundException("Doctor is not associated with this clinic")
         }
 
         val allSchedules = scheduleRepository.findByClinicId(clinicId)
+        println("[DEBUG-AVAIL] Total schedules found for clinicId=$clinicId: ${allSchedules.size}")
+        allSchedules.forEach { s ->
+            println("[DEBUG-AVAIL]   Schedule: id=${s.id}, type=${s.type}, dayOfWeek=${s.dayOfWeek}, specificDate=${s.specificDate}, startTime=${s.startTime}, endTime=${s.endTime}, doctorId=${s.doctor?.id}")
+        }
 
         // ── 1. Check if Clinic is Open on this Day of the Week ──
         val dayOfWeek = date.dayOfWeek
         val clinicHours = allSchedules.firstOrNull {
             it.type == ScheduleType.CLINIC_HOURS && it.dayOfWeek == dayOfWeek
         }
-
-        if (clinicHours == null || clinicHours.startTime == null || clinicHours.endTime == null) {
-            return emptyList()
-        }
+        println("[DEBUG-AVAIL] dayOfWeek=$dayOfWeek, clinicHours found=${clinicHours != null}, startTime=${clinicHours?.startTime}, endTime=${clinicHours?.endTime}")
 
         // ── 2. Check Clinic Specific Holiday ──
         val isClinicHoliday = scheduleRepository.existsByClinicIdAndSpecificDateAndType(
@@ -180,31 +187,52 @@ class PatientService(
             date,
             ScheduleType.HOLIDAY
         )
-        if (isClinicHoliday) return emptyList()
+        if (isClinicHoliday) {
+            println("[DEBUG-AVAIL] Clinic is on holiday for $date, returning empty")
+            return emptyList()
+        }
 
         val now = Instant.now()
+        println("[DEBUG-AVAIL] now=$now")
 
         return doctorRelations.flatMap { relation ->
-            val doctor = relation.doctor ?: return@flatMap emptyList()
-            if (!doctor.isActive) return@flatMap emptyList()
+            val doctor = relation.doctor ?: return@flatMap emptyList<AvailabilitySlotResponse>().also { println("[DEBUG-AVAIL] Doctor is null for relation") }
+            if (!doctor.isActive) return@flatMap emptyList<AvailabilitySlotResponse>().also { println("[DEBUG-AVAIL] Doctor ${doctor.id} is inactive") }
 
             val isDoctorHoliday = allSchedules.any {
                 it.doctor?.id == doctor.id &&
                         it.type == ScheduleType.HOLIDAY &&
                         it.specificDate == date
             }
-            if (isDoctorHoliday) return@flatMap emptyList()
+            if (isDoctorHoliday) return@flatMap emptyList<AvailabilitySlotResponse>().also { println("[DEBUG-AVAIL] Doctor ${doctor.id} is on holiday") }
 
+            // Try specific-date shift first, then fall back to recurring dayOfWeek shift
             val doctorSchedule = allSchedules.firstOrNull {
                 it.doctor?.id == doctor.id &&
                         it.type == ScheduleType.DOCTOR_SHIFT &&
                         it.specificDate == date
-            } ?: return@flatMap emptyList()
+            } ?: allSchedules.firstOrNull {
+                it.doctor?.id == doctor.id &&
+                        it.type == ScheduleType.DOCTOR_SHIFT &&
+                        it.dayOfWeek == dayOfWeek
+            }
 
-            // Intersect doctor shift with clinic working hours.
-            val startShift = maxOf(clinicHours.startTime!!, doctorSchedule.startTime!!)
-            val endShift = minOf(clinicHours.endTime!!, doctorSchedule.endTime!!)
-            if (!startShift.isBefore(endShift)) return@flatMap emptyList()
+            // Determine the effective shift window
+            val startShift: LocalTime
+            val endShift: LocalTime
+
+            if (doctorSchedule != null) {
+                println("[DEBUG-AVAIL] Found doctorSchedule: id=${doctorSchedule.id}, start=${doctorSchedule.startTime}, end=${doctorSchedule.endTime}")
+                // Intersect doctor shift with clinic working hours if defined
+                startShift = if (clinicHours?.startTime != null) maxOf(clinicHours.startTime!!, doctorSchedule.startTime!!) else doctorSchedule.startTime!!
+                endShift = if (clinicHours?.endTime != null) minOf(clinicHours.endTime!!, doctorSchedule.endTime!!) else doctorSchedule.endTime!!
+            } else {
+                println("[DEBUG-AVAIL] No DOCTOR_SHIFT for doctor ${doctor.id} on $date ($dayOfWeek), returning empty")
+                return@flatMap emptyList<AvailabilitySlotResponse>()
+            }
+
+            println("[DEBUG-AVAIL] startShift=$startShift, endShift=$endShift")
+            if (!startShift.isBefore(endShift)) return@flatMap emptyList<AvailabilitySlotResponse>().also { println("[DEBUG-AVAIL] startShift >= endShift, returning empty") }
 
             val from = date.atStartOfDay(zoneId).toInstant()
             val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
@@ -217,7 +245,12 @@ class PatientService(
                 val appointmentAt = date.atTime(time).atZone(zoneId).toOffsetDateTime()
                 val instant = appointmentAt.toInstant()
 
+                val timeMinutes = time.hour * 60 + time.minute
+                val endMinutes = endShift.hour * 60 + endShift.minute
+                val endsAfterShift = (timeMinutes + serviceDurationMinutes) > endMinutes
+
                 val available =
+                    !endsAfterShift &&
                     instant.isAfter(now) &&
                             !hasAppointmentOverlap(
                                 bookedAppointments,
@@ -226,7 +259,7 @@ class PatientService(
                             )
 
                 AvailabilitySlotResponse(
-                    scheduleId = doctorSchedule.id,
+                    scheduleId = doctorSchedule?.id,
                     doctorId = doctor.id!!,
                     doctorName = doctor.fullName,
                     date = date,
@@ -490,7 +523,7 @@ class PatientService(
         // has at least one free 15-minute start slot on the selected date.
         return serviceRelations.any { relation ->
             relation.specialty?.id?.let { serviceId ->
-                getAvailability(clinicId, date, null, serviceId)
+                getAvailability(clinicId, date, null, listOf(serviceId))
                     .any { it.available }
             } ?: false
         }
@@ -506,23 +539,12 @@ class PatientService(
 
         // Slots are start times and are always spaced by 15 minutes.
         // The service duration is checked separately when availability is calculated.
-        var current = start
-            .withSecond(0)
-            .withNano(0)
-
-        // If the schedule starts between quarter-hours, move to the next quarter.
-        val remainder = current.minute % 15
-        if (remainder != 0) {
-            current = current.plusMinutes((15 - remainder).toLong())
-        }
-
         val slots = mutableListOf<LocalTime>()
-
-        while (current.isBefore(end)) {
+        var current = start
+        while (!current.plusMinutes(15).isAfter(end)) {
             slots += current
             current = current.plusMinutes(15)
         }
-
         return slots
     }
 
@@ -560,7 +582,7 @@ class PatientService(
                 .mapNotNull { it.specialty?.id }
 
             val availableSlots = serviceIds
-                .flatMap { serviceId -> getAvailability(clinicId, date, null, serviceId) }
+                .flatMap { serviceId -> getAvailability(clinicId, date, null, listOf(serviceId)) }
                 .filter { it.available }
 
             if (availableSlots.isNotEmpty()) {

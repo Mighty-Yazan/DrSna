@@ -3,7 +3,9 @@ package com.example.demo.controller
 import com.example.demo.dto.*
 import com.example.demo.service.AuthService
 import jakarta.validation.Valid
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseCookie
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
@@ -30,7 +32,24 @@ class AuthController(
 
     @PostMapping("/login")
     fun login(@Valid @RequestBody request: LoginRequest): ResponseEntity<LoginResponse> {
-        val response = authService.login(request)
+        val (loginResponse, refreshToken) = authService.login(request)
+        
+        val cookie = ResponseCookie.from("refreshToken", refreshToken)
+            .httpOnly(true)
+            .secure(false) // Set to true in production
+            .path("/api/auth")
+            .maxAge(7 * 24 * 60 * 60)
+            .sameSite("Strict")
+            .build()
+            
+        return ResponseEntity.ok()
+            .header(HttpHeaders.SET_COOKIE, cookie.toString())
+            .body(loginResponse)
+    }
+
+    @PostMapping("/refresh")
+    fun refresh(@CookieValue(name = "refreshToken", required = true) refreshToken: String): ResponseEntity<LoginResponse> {
+        val response = authService.refresh(refreshToken)
         return ResponseEntity.ok(response)
     }
 
@@ -56,13 +75,27 @@ class AuthController(
 
     // Protected: Blacklists the current token's JTI so it cannot be reused
     @PostMapping("/logout")
-    fun logout(@AuthenticationPrincipal jwt: Jwt): ResponseEntity<MessageResponse> {
+    fun logout(
+        @AuthenticationPrincipal jwt: Jwt,
+        @CookieValue(name = "refreshToken", required = false) refreshToken: String?
+    ): ResponseEntity<MessageResponse> {
         val jti = jwt.id
         val expiresAt = jwt.expiresAt
         if (jti != null && expiresAt != null) {
-            authService.logout(jti, expiresAt.epochSecond)
+            authService.logout(jti, expiresAt.epochSecond, refreshToken)
         }
-        return ResponseEntity.ok(MessageResponse("Logged out successfully"))
+        
+        val clearCookie = ResponseCookie.from("refreshToken", "")
+            .httpOnly(true)
+            .secure(false) // Set to true in production
+            .path("/api/auth")
+            .maxAge(0)
+            .sameSite("Strict")
+            .build()
+            
+        return ResponseEntity.ok()
+            .header(HttpHeaders.SET_COOKIE, clearCookie.toString())
+            .body(MessageResponse("Logged out successfully"))
     }
 
     @PostMapping("/register/admin")

@@ -46,6 +46,28 @@ class SuperAdminService(
                 .setScale(2, RoundingMode.HALF_UP)
         }
 
+        val activeClinicsNewThisMonth = clinicRepository.findAll().count {
+            it.applicationStatus == ClinicApplicationStatus.APPROVED &&
+            it.submittedAt().isAfter(monthStart(currentMonth))
+        }.toLong()
+
+        val currentMonthBookings = appointmentRepository.findAllByAppointmentDateBetween(
+            monthStart(currentMonth), monthStart(currentMonth.plusMonths(1))
+        ).count { it.status != AppointmentStatus.CANCELLED }.toLong()
+
+        val previousMonthBookings = appointmentRepository.findAllByAppointmentDateBetween(
+            monthStart(previousMonth), monthStart(currentMonth)
+        ).count { it.status != AppointmentStatus.CANCELLED }.toLong()
+
+        val bookingsChangePercent = if (previousMonthBookings == 0L) {
+            if (currentMonthBookings == 0L) BigDecimal.ZERO else BigDecimal.valueOf(100)
+        } else {
+            BigDecimal.valueOf(currentMonthBookings - previousMonthBookings)
+                .divide(BigDecimal.valueOf(previousMonthBookings), 4, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100))
+                .setScale(2, RoundingMode.HALF_UP)
+        }
+
         val pending = getClinicsInternal(null, null, ClinicApplicationStatus.PENDING, true)
         val sixMonths = (5 downTo 0).map { offset ->
             val month = currentMonth.minusMonths(offset.toLong())
@@ -59,11 +81,11 @@ class SuperAdminService(
             commissionRevenueCurrentMonth = currentRevenue,
             commissionRevenueChangePercent = change,
             activeClinics = clinicRepository.countActiveByApplicationStatus(ClinicApplicationStatus.APPROVED),
+            activeClinicsNewThisMonth = activeClinicsNewThisMonth,
             pendingApprovals = pending.size.toLong(),
             pendingClinics = pending,
-            bookingsThisMonth = appointmentRepository.findAllByAppointmentDateBetween(
-                monthStart(currentMonth), monthStart(currentMonth.plusMonths(1))
-            ).count { it.status != AppointmentStatus.CANCELLED }.toLong(),
+            bookingsThisMonth = currentMonthBookings,
+            bookingsChangePercent = bookingsChangePercent,
             commissionRevenueLast6Months = sixMonths,
             fxRates = fxRates,
             fxLastUpdated = lastFxUpdate,
@@ -324,7 +346,14 @@ class SuperAdminService(
                             .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP)
                     )
                 }
-            TopClinicCommissionResponse(clinic.id!!, clinic.clinicName, commission.setScale(2, RoundingMode.HALF_UP), clinic.currency)
+            TopClinicCommissionResponse(
+                clinicId = clinic.id!!,
+                clinicName = clinic.clinicName,
+                commission = commission.setScale(2, RoundingMode.HALF_UP),
+                currency = clinic.currency,
+                city = clinic.user?.city ?: City.AMMAN,
+                rating = clinic.rating
+            )
         }.filterNotNull()
 
         return result.sortedByDescending { it.commission }.take(10)

@@ -128,7 +128,7 @@ class AuthService(
         )
     }
 
-    fun login(request: LoginRequest): LoginResponse {
+    fun login(request: LoginRequest): Pair<LoginResponse, String> {
         val normalizedEmail = request.email.trim().lowercase()
 
         val user = userRepository.findByEmail(normalizedEmail)
@@ -142,7 +142,24 @@ class AuthService(
             throw InvalidCredentialsException("Invalid email or password")
         }
 
-        val token = tokenService.generateToken(user)
+        val token = tokenService.generateAccessToken(user)
+        val refreshToken = tokenService.generateRefreshToken(user)
+
+        val loginResponse = LoginResponse(
+            token = token,
+            userId = user.id,
+            email = user.email,
+            role = user.role
+        )
+        return Pair(loginResponse, refreshToken)
+    }
+
+    fun refresh(refreshTokenString: String): LoginResponse {
+        val refreshToken = tokenService.validateRefreshToken(refreshTokenString)
+            ?: throw InvalidCredentialsException("Invalid or expired refresh token")
+        
+        val user = refreshToken.user
+        val token = tokenService.generateAccessToken(user)
 
         return LoginResponse(
             token = token,
@@ -207,8 +224,12 @@ class AuthService(
         )
     }
 
-    fun logout(jti: String, expiresAtEpochSecond: Long) {
+    fun logout(jti: String, expiresAtEpochSecond: Long, refreshToken: String?) {
         val expiresAt = java.time.Instant.ofEpochSecond(expiresAtEpochSecond)
         tokenBlacklistService.blacklist(jti, expiresAt)
+        
+        if (refreshToken != null) {
+            tokenService.deleteByToken(refreshToken)
+        }
     }
 }

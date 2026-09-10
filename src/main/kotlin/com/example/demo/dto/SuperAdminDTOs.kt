@@ -91,9 +91,11 @@ data class DashboardSummaryResponse(
     val commissionRevenueCurrentMonth: BigDecimal,
     val commissionRevenueChangePercent: BigDecimal,
     val activeClinics: Long,
+    val activeClinicsNewThisMonth: Long,
     val pendingApprovals: Long,
     val pendingClinics: List<ClinicAdminListItem>,
     val bookingsThisMonth: Long,
+    val bookingsChangePercent: BigDecimal,
     val commissionRevenueLast6Months: List<MonthlyCommissionRevenueResponse>,
     val fxRates: List<FxRateResponse>,
     val fxLastUpdated: Instant?,
@@ -138,5 +140,7 @@ data class TopClinicCommissionResponse(
     val clinicId: UUID,
     val clinicName: String,
     val commission: BigDecimal,
-    val currency: String?
+    val currency: String?,
+    val city: City,
+    val rating: BigDecimal
 )

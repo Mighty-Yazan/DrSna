@@ -10,13 +10,34 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
+import com.example.demo.repository.ScheduleRepository
 import java.time.LocalDate
 import java.util.UUID
 
 @RestController
 @RequestMapping("/api/patient")
 @PreAuthorize("hasRole('PATIENT')")
-class PatientController(private val patientService: PatientService) {
+class PatientController(
+    private val patientService: PatientService,
+    private val scheduleRepository: ScheduleRepository
+) {
+
+    @GetMapping("/dump-schedules")
+    fun dumpSchedules(): ResponseEntity<Any> {
+        val schedules = scheduleRepository.findAll().map { s ->
+            mapOf(
+                "id" to s.id,
+                "type" to s.type,
+                "clinicId" to s.clinic?.id,
+                "doctorId" to s.doctor?.id,
+                "dayOfWeek" to s.dayOfWeek,
+                "specificDate" to s.specificDate,
+                "startTime" to s.startTime,
+                "endTime" to s.endTime
+            )
+        }
+        return ResponseEntity.ok(schedules)
+    }
 
     @GetMapping("/clinics")
     fun searchClinics(
@@ -40,9 +61,9 @@ class PatientController(private val patientService: PatientService) {
         @PathVariable clinicId: UUID,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) date: LocalDate,
         @RequestParam(required = false) doctorId: UUID?,
-        @RequestParam serviceId: UUID
+        @RequestParam(required = false) serviceId: List<UUID>?
     ): ResponseEntity<List<AvailabilitySlotResponse>> =
-        ResponseEntity.ok(patientService.getAvailability(clinicId, date, doctorId, serviceId))
+        ResponseEntity.ok(patientService.getAvailability(clinicId, date, doctorId, serviceId ?: emptyList()))
 
     @PostMapping("/reviews")
     fun createReview(authentication: Authentication, @Valid @RequestBody request: CreateReviewRequest): ResponseEntity<ReviewResponse> =

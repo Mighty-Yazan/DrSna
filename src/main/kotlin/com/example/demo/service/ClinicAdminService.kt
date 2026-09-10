@@ -89,10 +89,22 @@ class ClinicAdminService(
         val clinic = getOrCreateClinic(userEmail)
         val specialty = specialtyRepository.findByNameIgnoreCase(name.trim()) ?: return
         clinicSpecialtyRepository.deleteByClinicIdAndSpecialtyId(clinic.id!!, specialty.id!!)
+    }
 
-        // If no other clinic is using this specialty, completely remove it from the database
+    @Transactional
+    fun deleteSpecialtyPermanently(userEmail: String, name: String) {
+        val clinic = getOrCreateClinic(userEmail)
+        val specialty = specialtyRepository.findByNameIgnoreCase(name.trim()) ?: return
+        clinicSpecialtyRepository.deleteByClinicIdAndSpecialtyId(clinic.id!!, specialty.id!!)
         if (!clinicSpecialtyRepository.existsBySpecialtyId(specialty.id!!)) {
             specialtyRepository.delete(specialty)
+        }
+    }
+
+    @Transactional(readOnly = true)
+    fun getAllSpecialties(): List<SpecialtyResponse> {
+        return specialtyRepository.findAll().map {
+            SpecialtyResponse(it.id!!, it.name, 60) // Default duration for unselected
         }
     }
 
@@ -133,7 +145,7 @@ class ClinicAdminService(
         val clinic = getOrCreateClinic(userEmail)
         return insuranceCompanyRepository
             .findAllByClinicIdOrderByNameAsc(clinic.id!!)
-            .map { InsuranceCompanyResponse(it.id!!, it.name) }
+            .map { it.toResponse() }
     }
 
     fun addInsuranceCompany(
@@ -141,19 +153,73 @@ class ClinicAdminService(
         request: InsuranceCompanyRequest
     ): InsuranceCompanyResponse {
         val clinic = getOrCreateClinic(userEmail)
-        val name = request.name.trim()
 
         val insuranceCompany = insuranceCompanyRepository.save(
             InsuranceCompany(
                 clinic = clinic,
-                name = name
+                name = request.name.trim(),
+                coverageTier = request.coverageTier?.trim(),
+                copay = request.copay?.trim(),
+                phone = request.phone?.trim(),
+                portalUrl = request.portalUrl?.trim(),
+                instantPreApproval = request.instantPreApproval,
+                network = request.network?.trim(),
+                code = request.code?.trim(),
+                badgeBg = request.badgeBg?.trim(),
+                badgeText = request.badgeText?.trim(),
+                directBillingType = request.directBillingType?.trim(),
+                status = request.status?.trim()
             )
         )
 
-        return InsuranceCompanyResponse(
-            id = insuranceCompany.id!!,
-            name = insuranceCompany.name
-        )
+        return insuranceCompany.toResponse()
+    }
+
+    fun updateInsuranceCompany(
+        userEmail: String,
+        insuranceId: UUID,
+        request: InsuranceCompanyRequest
+    ): InsuranceCompanyResponse {
+        val clinic = getOrCreateClinic(userEmail)
+        
+        val insuranceCompany = insuranceCompanyRepository.findById(insuranceId)
+            .orElseThrow { ResourceNotFoundException("Insurance company not found with ID: $insuranceId") }
+
+        if (insuranceCompany.clinic?.id != clinic.id) {
+            throw ResourceNotFoundException("Insurance company not found in your clinic")
+        }
+
+        insuranceCompany.name = request.name.trim()
+        insuranceCompany.coverageTier = request.coverageTier?.trim()
+        insuranceCompany.copay = request.copay?.trim()
+        insuranceCompany.phone = request.phone?.trim()
+        insuranceCompany.portalUrl = request.portalUrl?.trim()
+        insuranceCompany.instantPreApproval = request.instantPreApproval
+        insuranceCompany.network = request.network?.trim()
+        insuranceCompany.code = request.code?.trim()
+        insuranceCompany.badgeBg = request.badgeBg?.trim()
+        insuranceCompany.badgeText = request.badgeText?.trim()
+        insuranceCompany.directBillingType = request.directBillingType?.trim()
+        insuranceCompany.status = request.status?.trim()
+
+        val updated = insuranceCompanyRepository.save(insuranceCompany)
+        return updated.toResponse()
+    }
+
+    @Transactional
+    fun deleteInsuranceCompany(
+        userEmail: String,
+        insuranceId: UUID
+    ) {
+        val clinic = getOrCreateClinic(userEmail)
+        val insuranceCompany = insuranceCompanyRepository.findById(insuranceId)
+            .orElseThrow { ResourceNotFoundException("Insurance company not found with ID: $insuranceId") }
+
+        if (insuranceCompany.clinic?.id != clinic.id) {
+            throw ResourceNotFoundException("Insurance company not found in your clinic")
+        }
+
+        insuranceCompanyRepository.delete(insuranceCompany)
     }
 
     @Transactional(readOnly = true)
@@ -351,5 +417,21 @@ class ClinicAdminService(
         isActive = this.isActive,
         bio = this.bio,
         specialty = this.specialty
+    )
+
+    private fun InsuranceCompany.toResponse() = InsuranceCompanyResponse(
+        id = this.id!!,
+        name = this.name,
+        coverageTier = this.coverageTier,
+        copay = this.copay,
+        phone = this.phone,
+        portalUrl = this.portalUrl,
+        instantPreApproval = this.instantPreApproval,
+        network = this.network,
+        code = this.code,
+        badgeBg = this.badgeBg,
+        badgeText = this.badgeText,
+        directBillingType = this.directBillingType,
+        status = this.status
     )
 }
