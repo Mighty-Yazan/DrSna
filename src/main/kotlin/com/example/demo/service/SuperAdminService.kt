@@ -125,7 +125,7 @@ class SuperAdminService(
 
     @Transactional(readOnly = true)
     fun getPendingClinics(): List<ClinicAdminListItem> =
-        getClinicsInternal(null, null, ClinicApplicationStatus.PENDING, true)
+        getClinicsInternal(null, null, ClinicApplicationStatus.PENDING, null)
 
     @Transactional(readOnly = true)
     fun getClinicReview(clinicId: UUID): ClinicApplicationReviewResponse {
@@ -308,7 +308,7 @@ class SuperAdminService(
     }
 
     private fun getClinic(clinicId: UUID): Clinic =
-        clinicRepository.findDetailsById(clinicId)
+        clinicRepository.findByIdWithUser(clinicId)
             .orElseThrow { ResourceNotFoundException("Clinic not found with ID: $clinicId") }
 
     private fun commissionRevenue(month: YearMonth): BigDecimal {
@@ -334,7 +334,7 @@ class SuperAdminService(
         val result = clinics.map { clinic ->
             val clinicUserId = clinic.user?.id ?: return@map null
             val commission = appointmentRepository.findAllByClinicIdAndAppointmentDateBetween(
-                clinicUserId,
+                clinic.id!!,
                 Instant.EPOCH,
                 Instant.now()
             ).filter { it.status == AppointmentStatus.COMPLETED }

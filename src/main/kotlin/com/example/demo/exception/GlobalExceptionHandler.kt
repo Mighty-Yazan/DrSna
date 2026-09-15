@@ -70,6 +70,11 @@ class GlobalExceptionHandler(private val messageSource: MessageSource) {
         return buildResponse(HttpStatus.BAD_REQUEST, getMessage("error.invalid_arguments", ex.message ?: "Invalid arguments provided"), request)
     }
 
+    @ExceptionHandler(ClinicNotOperationalException::class)
+    fun handleClinicNotOperationalException(ex: ClinicNotOperationalException, request: HttpServletRequest): ResponseEntity<ApiErrorResponse> {
+        return buildResponse(HttpStatus.FORBIDDEN, getMessage("error.clinic_not_operational", ex.message ?: "Your clinic is not approved or inactive. Operational actions are restricted."), request)
+    }
+
     @ExceptionHandler(Exception::class)
     fun handleAllOtherExceptions(ex: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorResponse> {
         logger.error("Unexpected error occurred at ${request.requestURI}", ex)

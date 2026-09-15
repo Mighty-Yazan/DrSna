@@ -74,6 +74,11 @@ class AppointmentService(
         // 2. Fetch dependencies
         val clinicEntity = clinicRepository.findById(request.clinicId)
             .orElseThrow { ResourceNotFoundException("Clinic with ID '${request.clinicId}' was not found") }
+        
+        if (clinicEntity.applicationStatus != com.example.demo.model.ClinicApplicationStatus.APPROVED || clinicEntity.user?.isActive != true) {
+            throw com.example.demo.exception.ClinicNotOperationalException("This clinic is not available for bookings at the moment.")
+        }
+        
         val clinicUser = clinicEntity.user!!
 
         val doctorUser = userRepository.findById(request.doctorId)

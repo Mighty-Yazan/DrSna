@@ -13,7 +13,7 @@ import java.util.UUID
 
 @RestController
 @RequestMapping("/api/clinic/schedules")
-@PreAuthorize("hasRole('CLINIC')")
+@PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
 class ScheduleAdminController(
     private val scheduleAdminService: ScheduleAdminService
 ) {
