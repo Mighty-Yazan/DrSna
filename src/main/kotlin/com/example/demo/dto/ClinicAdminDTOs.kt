@@ -114,6 +114,10 @@ data class UpdateDoctorRequest(
     @field:Size(min = 2, message = "Full name must be at least 2 characters")
     val fullName: String,
 
+    @field:NotBlank(message = "Doctor email is required")
+    @field:Email(message = "Email must be a valid email address")
+    val email: String,
+
     val city: City? = null,
     val bio: String? = null,
     val specialty: String? = null

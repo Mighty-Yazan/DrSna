@@ -24,7 +24,7 @@ class TokenService(
         val claims = JwtClaimsSet.builder()
             .issuer("self")
             .issuedAt(now)
-            .expiresAt(now.plus(15, ChronoUnit.MINUTES)) // 15 mins
+            .expiresAt(now.plus(60, ChronoUnit.MINUTES)) // 60 mins
             .subject(user.email)
             .id(UUID.randomUUID().toString())                // JTI for blacklist support
             .claim("userId", user.id.toString())             // UUID as string
@@ -63,4 +63,4 @@ class TokenService(
         }
     }
 }
-
+

@@ -22,7 +22,7 @@ interface ClinicRepository : JpaRepository<Clinic, UUID> {
     @Query("select count(c) from Clinic c join c.user u where c.applicationStatus = :status and u.isActive = true")
     fun countActiveByApplicationStatus(@Param("status") status: ClinicApplicationStatus): Long
 
-    @Query("select c from Clinic c join fetch c.user u where (:name is null or lower(c.clinicName) like lower(concat('%', :name, '%'))) and (:city is null or u.city = :city) and (:status is null or c.applicationStatus = :status) and (:active is null or u.isActive = :active) order by u.createdAt desc")
+    @Query("select c from Clinic c join fetch c.user u where (:name is null or lower(c.clinicName) like lower(concat('%', cast(:name as string), '%'))) and (:city is null or u.city = :city) and (:status is null or c.applicationStatus = :status) and (:active is null or u.isActive = :active) order by u.createdAt desc")
     fun searchForAdmin(
         @Param("name") name: String?,
         @Param("city") city: City?,
@@ -33,6 +33,6 @@ interface ClinicRepository : JpaRepository<Clinic, UUID> {
     @Query("select c from Clinic c join fetch c.user u where c.id = :clinicId")
     fun findDetailsById(@Param("clinicId") clinicId: UUID): Optional<Clinic>
 
-    @Query("select c from Clinic c join fetch c.user u where lower(c.clinicName) like lower(concat('%', coalesce(:name, ''), '%')) and (:city is null or u.city = :city) order by case when u.city = :patientCity then 0 else 1 end, c.rating desc nulls last, lower(c.clinicName) asc")
+    @Query("select c from Clinic c join fetch c.user u where lower(c.clinicName) like lower(concat('%', coalesce(cast(:name as string), ''), '%')) and (:city is null or u.city = :city) order by case when u.city = :patientCity then 0 else 1 end, c.rating desc nulls last, lower(c.clinicName) asc")
     fun search(@Param("name") name: String?, @Param("city") city: City?, @Param("patientCity") patientCity: City): List<Clinic>
 }

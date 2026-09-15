@@ -34,7 +34,8 @@ data class AppointmentListResponse(
 data class CreateWalkInAppointmentRequest(
     val doctorId: UUID?,
     val appointmentDate: java.time.LocalDate?,
-    val appointmentTime: java.time.LocalTime?
+    val appointmentTime: java.time.LocalTime?,
+    val serviceIds: List<UUID>? = null
 )
 
 // ============================================================

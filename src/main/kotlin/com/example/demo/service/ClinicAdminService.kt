@@ -301,6 +301,14 @@ class ClinicAdminService(
         val doctorUser = userRepository.findById(doctorUserId)
             .orElseThrow { ResourceNotFoundException("Doctor user not found with ID: $doctorUserId") }
 
+        val newEmail = request.email.trim().lowercase()
+        if (newEmail != doctorUser.email.lowercase()) {
+            if (userRepository.existsByEmail(newEmail)) {
+                throw DuplicateResourceException("User with email '${request.email}' already exists")
+            }
+            doctorUser.email = newEmail
+        }
+
         doctorUser.fullName = request.fullName.trim()
         if (request.city != null) {
             doctorUser.city = request.city

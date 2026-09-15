@@ -516,14 +516,28 @@ class AppointmentService(
             ResourceNotFoundException("Doctor not found")
         }
 
+        val specialtiesList =
+            if (!request.serviceIds.isNullOrEmpty()) {
+                clinicSpecialtyRepository.findAllByClinicId(clinicUserId).filter {
+                    it.specialty?.id in request.serviceIds
+                }
+            } else {
+                emptyList()
+            }
+
+        var serviceDurationMinutes = specialtiesList.sumOf { it.durationMinutes }
+        if (serviceDurationMinutes <= 0) {
+            serviceDurationMinutes = 15
+        }
+
         val appointment = Appointment(
             clinic = clinic.user!!,
             doctor = doctorUser,
             patient = null,
-            specialties = mutableListOf(),
+            specialties = specialtiesList.mapNotNull { it.specialty }.toMutableList(),
             schedule = null,
             appointmentDate = date.atTime(time).atZone(zoneId).toInstant(),
-            durationMinutes = 15,
+            durationMinutes = serviceDurationMinutes,
             status = AppointmentStatus.CONFIRMED, // Walk-in is automatically confirmed
             bookingKey = null
         )

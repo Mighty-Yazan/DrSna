@@ -47,7 +47,6 @@ class SuperAdminService(
         }
 
         val activeClinicsNewThisMonth = clinicRepository.findAll().count {
-            it.applicationStatus == ClinicApplicationStatus.APPROVED &&
             it.submittedAt().isAfter(monthStart(currentMonth))
         }.toLong()
 
@@ -80,7 +79,7 @@ class SuperAdminService(
         return DashboardSummaryResponse(
             commissionRevenueCurrentMonth = currentRevenue,
             commissionRevenueChangePercent = change,
-            activeClinics = clinicRepository.countActiveByApplicationStatus(ClinicApplicationStatus.APPROVED),
+            activeClinics = clinicRepository.count(),
             activeClinicsNewThisMonth = activeClinicsNewThisMonth,
             pendingApprovals = pending.size.toLong(),
             pendingClinics = pending,

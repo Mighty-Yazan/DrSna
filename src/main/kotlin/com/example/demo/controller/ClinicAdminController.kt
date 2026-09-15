@@ -33,11 +33,11 @@ class ClinicAdminController(
     fun availability(
         authentication: Authentication,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) date: LocalDate,
-        @RequestParam(required = false) doctorId: UUID?
+        @RequestParam(required = false) doctorId: UUID?,
+        @RequestParam(required = false) serviceId: List<UUID>?
     ): ResponseEntity<List<AvailabilitySlotResponse>> {
-        // Find clinic ID using the logged-in email
         val profile = clinicAdminService.getProfile(authentication.name)
-        return ResponseEntity.ok(patientService.getAvailability(profile.id, date, doctorId, emptyList()))
+        return ResponseEntity.ok(patientService.getAvailability(profile.id, date, doctorId, serviceId ?: emptyList()))
     }
 
     @PutMapping("/profile")
