@@ -19,15 +19,14 @@ class ClinicSecurity(
      * and their user account is active.
      */
     fun isApprovedAndActive(email: String): Boolean {
-        val clinic = clinicRepository.findByUserEmail(email)
-            .orElseThrow { ClinicNotOperationalException("Clinic not found for email: $email") }
+        val clinic = clinicRepository.findByUserEmail(email).orElse(null) ?: return false
 
         if (clinic.applicationStatus != ClinicApplicationStatus.APPROVED) {
-            throw ClinicNotOperationalException("Clinic application is ${clinic.applicationStatus}. Operational actions are restricted.")
+            return false
         }
 
         if (clinic.user?.isActive != true) {
-            throw ClinicNotOperationalException("Clinic account is deactivated. Operational actions are restricted.")
+            return false
         }
 
         return true
@@ -38,32 +37,26 @@ class ClinicSecurity(
      * Used to restrict doctors from managing schedules/appointments if their clinic is suspended.
      */
     fun isDoctorClinicApprovedAndActive(doctorEmail: String): Boolean {
-        val doctorUser = userRepository.findByEmail(doctorEmail)
-            .orElseThrow { ClinicNotOperationalException("Doctor not found for email: $doctorEmail") }
+        val doctorUser = userRepository.findByEmail(doctorEmail).orElse(null) ?: return false
 
         val clinicDoctors = clinicDoctorRepository.findAllByDoctor_Id(doctorUser.id!!)
         if (clinicDoctors.isEmpty()) {
-            throw ClinicNotOperationalException("Doctor is not associated with any clinic.")
+            return false
         }
 
         // A doctor typically belongs to one clinic in this system.
         // We check if at least one associated clinic is approved and active.
-        val hasApprovedClinic = clinicDoctors.any { clinicDoc ->
-            val clinicUserId = clinicDoc.clinic?.id ?: return@any false
-            val clinicOpt = clinicRepository.findByUserId(clinicUserId)
-            
+        return clinicDoctors.any { clinicDoc ->
+            val clinicUser = clinicDoc.clinic ?: return@any false
+            // Optimize: Check if the user is active BEFORE hitting the ClinicRepository
+            if (!clinicUser.isActive) return@any false
+
+            val clinicOpt = clinicRepository.findByUserId(clinicUser.id!!)
             if (clinicOpt.isPresent) {
-                val clinic = clinicOpt.get()
-                clinic.applicationStatus == ClinicApplicationStatus.APPROVED && clinic.user?.isActive == true
+                clinicOpt.get().applicationStatus == ClinicApplicationStatus.APPROVED
             } else {
                 false
             }
         }
-
-        if (!hasApprovedClinic) {
-            throw ClinicNotOperationalException("The clinic you belong to is not approved or is inactive. Operational actions are restricted.")
-        }
-
-        return true
     }
 }

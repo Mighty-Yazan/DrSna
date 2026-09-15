@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional
 class AuthService(
     private val userRepository: UserRepository,
     private val clinicRepository: com.example.demo.repository.ClinicRepository,
+    private val clinicDoctorRepository: com.example.demo.repository.ClinicDoctorRepository,
     private val passwordEncoder: PasswordEncoder,
     private val tokenService: TokenService,
     private val tokenBlacklistService: TokenBlacklistService
@@ -138,6 +139,24 @@ class AuthService(
             throw InvalidCredentialsException("Account is inactive")
         }
 
+        if (user.role == Role.CLINIC) {
+            val clinic = clinicRepository.findByUserId(user.id!!).orElse(null)
+            if (clinic == null || clinic.applicationStatus != ClinicApplicationStatus.APPROVED) {
+                throw InvalidCredentialsException("Clinic application is not approved")
+            }
+        } else if (user.role == Role.DOCTOR) {
+            val clinicDocs = clinicDoctorRepository.findAllByDoctor_Id(user.id!!)
+            val hasApprovedClinic = clinicDocs.any { cd ->
+                val clinicUser = cd.clinic ?: return@any false
+                if (!clinicUser.isActive) return@any false
+                val clinic = clinicRepository.findByUserId(clinicUser.id!!).orElse(null)
+                clinic?.applicationStatus == ClinicApplicationStatus.APPROVED
+            }
+            if (!hasApprovedClinic) {
+                throw InvalidCredentialsException("Doctor's clinic is not approved or inactive")
+            }
+        }
+
         if (!passwordEncoder.matches(request.password, user.password)) {
             throw InvalidCredentialsException("Invalid email or password")
         }
@@ -159,6 +178,32 @@ class AuthService(
             ?: throw InvalidCredentialsException("Invalid or expired refresh token")
         
         val user = refreshToken.user
+
+        if (!user.isActive) {
+            tokenService.deleteByToken(refreshTokenString)
+            throw InvalidCredentialsException("Account is inactive")
+        }
+
+        if (user.role == Role.CLINIC) {
+            val clinic = clinicRepository.findByUserId(user.id!!).orElse(null)
+            if (clinic == null || clinic.applicationStatus != ClinicApplicationStatus.APPROVED) {
+                tokenService.deleteByToken(refreshTokenString)
+                throw InvalidCredentialsException("Clinic application is not approved")
+            }
+        } else if (user.role == Role.DOCTOR) {
+            val clinicDocs = clinicDoctorRepository.findAllByDoctor_Id(user.id!!)
+            val hasApprovedClinic = clinicDocs.any { cd ->
+                val clinicUser = cd.clinic ?: return@any false
+                if (!clinicUser.isActive) return@any false
+                val clinic = clinicRepository.findByUserId(clinicUser.id!!).orElse(null)
+                clinic?.applicationStatus == ClinicApplicationStatus.APPROVED
+            }
+            if (!hasApprovedClinic) {
+                tokenService.deleteByToken(refreshTokenString)
+                throw InvalidCredentialsException("Doctor's clinic is not approved or inactive")
+            }
+        }
+
         val token = tokenService.generateAccessToken(user)
 
         return LoginResponse(
@@ -168,7 +213,6 @@ class AuthService(
             role = user.role
         )
     }
-
     fun getProfile(email: String): UserProfileResponse {
         val user = userRepository.findByEmail(email)
             .orElseThrow { ResourceNotFoundException("User not found with email: $email") }
