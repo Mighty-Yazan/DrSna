@@ -30,9 +30,12 @@ interface ClinicRepository : JpaRepository<Clinic, UUID> {
         @Param("active") active: Boolean?
     ): List<Clinic>
 
-    @Query("select c from Clinic c join fetch c.user u where c.id = :clinicId")
+    @Query("select c from Clinic c join fetch c.user u where c.id = :clinicId and c.applicationStatus = 'APPROVED' and u.isActive = true")
     fun findDetailsById(@Param("clinicId") clinicId: UUID): Optional<Clinic>
 
-    @Query("select c from Clinic c join fetch c.user u where lower(c.clinicName) like lower(concat('%', coalesce(cast(:name as string), ''), '%')) and (:city is null or u.city = :city) order by case when u.city = :patientCity then 0 else 1 end, c.rating desc nulls last, lower(c.clinicName) asc")
+    @Query("select c from Clinic c join fetch c.user u where c.id = :clinicId")
+    fun findByIdWithUser(@Param("clinicId") clinicId: UUID): Optional<Clinic>
+
+    @Query("select c from Clinic c join fetch c.user u where lower(c.clinicName) like lower(concat('%', coalesce(cast(:name as string), ''), '%')) and (:city is null or u.city = :city) and c.applicationStatus = 'APPROVED' and u.isActive = true order by case when u.city = :patientCity then 0 else 1 end, c.rating desc nulls last, lower(c.clinicName) asc")
     fun search(@Param("name") name: String?, @Param("city") city: City?, @Param("patientCity") patientCity: City): List<Clinic>
 }

@@ -57,7 +57,56 @@ class ClinicAdminService(
             userRepository.save(clinic.user!!)
         }
 
+        if (clinic.applicationStatus == ClinicApplicationStatus.REJECTED) {
+            clinic.applicationStatus = ClinicApplicationStatus.PENDING
+            clinic.rejectionReason = null
+        }
+
         val updatedClinic = clinicRepository.save(clinic)
+        return updatedClinic.toResponse()
+    }
+
+    fun resubmitApplication(userEmail: String, request: ResubmitApplicationRequest): ClinicProfileResponse {
+        val clinic = getOrCreateClinic(userEmail)
+        val user = clinic.user ?: throw IllegalStateException("Clinic missing linked user")
+
+        if (clinic.applicationStatus != ClinicApplicationStatus.REJECTED) {
+            throw AppException("Only rejected applications can be resubmitted")
+        }
+
+        val newEmail = request.email.trim().lowercase()
+        if (newEmail != user.email.lowercase()) {
+            if (userRepository.existsByEmail(newEmail)) {
+                throw DuplicateResourceException("User with email '${request.email}' already exists")
+            }
+            user.email = newEmail
+        }
+
+        if (!request.password.isNullOrBlank()) {
+            if (request.password != request.confirmPassword) {
+                throw AppException("Passwords do not match")
+            }
+            user.password = passwordEncoder.encode(request.password!!)!!
+        }
+
+        user.fullName = request.clinicName.trim()
+        user.city = request.city
+        clinic.clinicName = request.clinicName.trim()
+
+        val newLicenseNumber = request.clinicLicenseNumber.trim()
+        if (newLicenseNumber != user.clinicLicenseNumber) {
+            if (userRepository.existsByClinicLicenseNumber(newLicenseNumber)) {
+                throw DuplicateResourceException("Clinic license number is already registered")
+            }
+            user.clinicLicenseNumber = newLicenseNumber
+        }
+        
+        clinic.applicationStatus = ClinicApplicationStatus.PENDING
+        clinic.rejectionReason = null
+
+        userRepository.save(user)
+        val updatedClinic = clinicRepository.save(clinic)
+
         return updatedClinic.toResponse()
     }
 
@@ -412,7 +461,8 @@ class ClinicAdminService(
         rating = this.rating,
         description = this.description,
         city = this.user?.city ?: throw IllegalStateException("Clinic missing linked user city"),
-        applicationStatus = this.applicationStatus
+        applicationStatus = this.applicationStatus,
+        rejectionReason = this.rejectionReason
     )
 
 

@@ -97,7 +97,7 @@ class AppointmentController(
     // ============================================================
 
     @GetMapping("/api/doctor/appointments")
-    @PreAuthorize("hasRole('DOCTOR')")
+    @PreAuthorize("hasRole('DOCTOR') and @clinicSecurity.isDoctorClinicApprovedAndActive(authentication.name)")
     fun doctorAppointments(
         authentication: Authentication,
         @RequestParam(required = false)
@@ -127,7 +127,7 @@ class AppointmentController(
     // ============================================================
 
     @PostMapping("/api/clinic/appointments")
-    @PreAuthorize("hasRole('CLINIC')")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun createWalkInAppointment(
         authentication: Authentication,
         @Valid
@@ -149,7 +149,7 @@ class AppointmentController(
     }
 
     @DeleteMapping("/api/clinic/appointments/{appointmentId}")
-    @PreAuthorize("hasRole('CLINIC')")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun deleteWalkInAppointment(
         authentication: Authentication,
         @PathVariable appointmentId: UUID
@@ -169,7 +169,7 @@ class AppointmentController(
     }
 
     @GetMapping("/api/clinic/appointments")
-    @PreAuthorize("hasRole('CLINIC')")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun clinicAppointments(
         authentication: Authentication,
 
@@ -212,7 +212,7 @@ class AppointmentController(
     // ============================================================
 
     @GetMapping("/api/appointments")
-    @PreAuthorize("hasAnyRole('CLINIC','DOCTOR','PATIENT')")
+    @PreAuthorize("(hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)) or (hasRole('DOCTOR') and @clinicSecurity.isDoctorClinicApprovedAndActive(authentication.name)) or hasRole('PATIENT')")
     fun appointments(
         authentication: Authentication,
 
@@ -260,7 +260,7 @@ class AppointmentController(
     // ============================================================
 
     @PatchMapping("/api/appointments/{appointmentId}/status")
-    @PreAuthorize("hasRole('CLINIC')")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun updateStatus(
         authentication: Authentication,
         @PathVariable appointmentId: UUID,
@@ -290,7 +290,7 @@ class AppointmentController(
     // ============================================================
 
     @PatchMapping("/api/appointments/{appointmentId}/reschedule")
-    @PreAuthorize("hasRole('CLINIC')")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun reschedule(
         authentication: Authentication,
         @PathVariable appointmentId: UUID,

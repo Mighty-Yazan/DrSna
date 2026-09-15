@@ -16,7 +16,6 @@ import com.example.demo.service.PatientService
 
 @RestController
 @RequestMapping("/api/clinic")
-@PreAuthorize("hasRole('CLINIC')")
 class ClinicAdminController(
     private val clinicAdminService: ClinicAdminService,
     private val patientService: PatientService
@@ -24,6 +23,7 @@ class ClinicAdminController(
     // ── CLINIC PROFILE ENDPOINTS ────────────────────────────────────────
 
     @GetMapping("/profile")
+    @PreAuthorize("hasRole('CLINIC')")
     fun getProfile(authentication: Authentication): ResponseEntity<ClinicProfileResponse> {
         val profile = clinicAdminService.getProfile(authentication.name)
         return ResponseEntity.ok(profile)
@@ -41,6 +41,7 @@ class ClinicAdminController(
     }
 
     @PutMapping("/profile")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun updateProfile(
         authentication: Authentication,
         @Valid @RequestBody request: ClinicProfileRequest
@@ -49,15 +50,27 @@ class ClinicAdminController(
         return ResponseEntity.ok(updatedProfile)
     }
 
+    @PutMapping("/resubmit")
+    @PreAuthorize("hasRole('CLINIC')")
+    fun resubmitApplication(
+        authentication: Authentication,
+        @Valid @RequestBody request: ResubmitApplicationRequest
+    ): ResponseEntity<ClinicProfileResponse> {
+        val updatedProfile = clinicAdminService.resubmitApplication(authentication.name, request)
+        return ResponseEntity.ok(updatedProfile)
+    }
+
 
 
     @GetMapping("/insurance-companies")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun getInsuranceCompanies(
         authentication: Authentication
     ): ResponseEntity<List<InsuranceCompanyResponse>> =
         ResponseEntity.ok(clinicAdminService.getInsuranceCompanies(authentication.name))
 
     @PostMapping("/insurance-companies")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun addInsuranceCompany(
         authentication: Authentication,
         @Valid @RequestBody request: InsuranceCompanyRequest
@@ -66,6 +79,7 @@ class ClinicAdminController(
             .body(clinicAdminService.addInsuranceCompany(authentication.name, request))
 
     @PutMapping("/insurance-companies/{insuranceId}")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun updateInsuranceCompany(
         authentication: Authentication,
         @PathVariable insuranceId: UUID,
@@ -74,6 +88,7 @@ class ClinicAdminController(
         ResponseEntity.ok(clinicAdminService.updateInsuranceCompany(authentication.name, insuranceId, request))
 
     @DeleteMapping("/insurance-companies/{insuranceId}")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun deleteInsuranceCompany(
         authentication: Authentication,
         @PathVariable insuranceId: UUID
@@ -83,6 +98,7 @@ class ClinicAdminController(
     }
 
     @GetMapping("/reviews")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun getReviews(
         authentication: Authentication,
         @RequestParam(required = false) doctorId: UUID?,
@@ -90,6 +106,7 @@ class ClinicAdminController(
     ): ResponseEntity<List<ReviewResponse>> = ResponseEntity.ok(clinicAdminService.getReviews(authentication.name, doctorId, rating))
 
     @PatchMapping("/reviews/{reviewId}/reply")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun replyToReview(
         authentication: Authentication,
         @PathVariable reviewId: UUID,
@@ -101,10 +118,12 @@ class ClinicAdminController(
         ResponseEntity.ok(clinicAdminService.getAllSpecialties())
 
     @GetMapping("/specialties")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun getSpecialties(authentication: Authentication): ResponseEntity<List<SpecialtyResponse>> =
         ResponseEntity.ok(clinicAdminService.getSpecialties(authentication.name))
 
     @PostMapping("/specialties")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun addSpecialty(
         authentication: Authentication,
         @Valid @RequestBody request: SpecialtyRequest
@@ -112,6 +131,7 @@ class ClinicAdminController(
         ResponseEntity.status(HttpStatus.CREATED).body(clinicAdminService.addSpecialty(authentication.name, request))
 
     @PutMapping("/specialties/{specialtyId}/duration")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun updateSpecialtyDuration(
         authentication: Authentication,
         @PathVariable specialtyId: UUID,
@@ -126,6 +146,7 @@ class ClinicAdminController(
         )
 
     @DeleteMapping("/specialties/{name}")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun removeSpecialty(
         authentication: Authentication,
         @PathVariable name: String
@@ -135,6 +156,7 @@ class ClinicAdminController(
     }
 
     @DeleteMapping("/specialties/{name}/permanent")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun deleteSpecialtyPermanently(
         authentication: Authentication,
         @PathVariable name: String
@@ -146,12 +168,14 @@ class ClinicAdminController(
     // ── DOCTORS ENDPOINTS ───────────────────────────────────────────────
 
     @GetMapping("/doctors")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun getDoctors(authentication: Authentication): ResponseEntity<List<DoctorResponse>> {
         val doctors = clinicAdminService.getDoctors(authentication.name)
         return ResponseEntity.ok(doctors)
     }
 
     @PostMapping("/doctors")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun addDoctor(
         authentication: Authentication,
         @Valid @RequestBody request: AddDoctorRequest
@@ -161,6 +185,7 @@ class ClinicAdminController(
     }
 
     @PutMapping("/doctors/{doctorId}")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun updateDoctor(
         authentication: Authentication,
         @PathVariable doctorId: UUID,
@@ -171,6 +196,7 @@ class ClinicAdminController(
     }
 
     @PatchMapping("/doctors/{doctorId}/toggle-status")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun toggleDoctorStatus(
         authentication: Authentication,
         @PathVariable doctorId: UUID
@@ -180,6 +206,7 @@ class ClinicAdminController(
     }
 
     @DeleteMapping("/doctors/{doctorId}")
+    @PreAuthorize("hasRole('CLINIC') and @clinicSecurity.isApprovedAndActive(authentication.name)")
     fun deleteDoctor(
         authentication: Authentication,
         @PathVariable doctorId: UUID

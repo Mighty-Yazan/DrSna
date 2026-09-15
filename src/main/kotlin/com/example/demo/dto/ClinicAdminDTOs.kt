@@ -13,6 +13,31 @@ import java.util.UUID
 
 // ── CLINIC PROFILE DTOs ──────────────────────────────────────────────
 
+data class ResubmitApplicationRequest(
+    @field:NotBlank(message = "Clinic name is required")
+    @field:Size(min = 2, message = "Clinic name must be at least 2 characters")
+    val clinicName: String,
+
+    @field:NotBlank(message = "Email is required")
+    @field:Email(message = "Email must be a valid email address")
+    val email: String,
+
+    val city: City,
+
+    @field:NotBlank(message = "Clinic license number is required")
+    val clinicLicenseNumber: String,
+
+    // Passwords optional on resubmit
+    @field:Size(min = 8, max = 12, message = "Password must be between 8 and 12 characters")
+    @field:Pattern(
+        regexp = "^(?=.*[0-9])(?=.*[^a-zA-Z0-9]).+$",
+        message = "Password must contain at least one number and one special character"
+    )
+    val password: String?,
+
+    val confirmPassword: String?
+)
+
 data class ClinicProfileRequest(
     @field:NotBlank(message = "Clinic name cannot be blank")
     @field:Size(max = 100, message = "clinic name must not exceed 100 characters")
@@ -47,7 +72,8 @@ data class ClinicProfileResponse(
     val rating: BigDecimal,
     val description: String?,
     val city: City,
-    val applicationStatus: ClinicApplicationStatus
+    val applicationStatus: ClinicApplicationStatus,
+    val rejectionReason: String?
 )
 
 data class InsuranceCompanyRequest(
