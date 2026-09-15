@@ -235,4 +235,19 @@ class AuthService(
             tokenService.deleteByToken(refreshToken)
         }
     }
+    // method for the super admin to change pass if his is active is false
+    fun changePassword(email: String, request: ChangePasswordRequest): MessageResponse {
+        if (request.newPassword != request.confirmPassword) {
+            throw PasswordMismatchException()
+        }
+
+        val user = userRepository.findByEmail(email)
+            .orElseThrow { ResourceNotFoundException("User not found: $email") }
+
+        user.password = passwordEncoder.encode(request.newPassword)!!
+        user.isActive = true // Activate the account after successful password change
+        userRepository.save(user)
+
+        return MessageResponse("Password changed successfully. Account is now active.")
+    }
 }

@@ -106,5 +106,15 @@ class AuthController(
         val response = authService.registerAdmin(request)
         return ResponseEntity.status(HttpStatus.CREATED).body(response)
     }
+    @PutMapping("/change-password")
+    @PreAuthorize("hasRole('ADMIN')")
+    fun changePassword(
+        @AuthenticationPrincipal jwt: Jwt,
+        @Valid @RequestBody request: ChangePasswordRequest
+    ): ResponseEntity<MessageResponse> {
+        val email = jwt.subject ?: throw IllegalStateException("Invalid JWT subject")
+        val response = authService.changePassword(email, request)
+        return ResponseEntity.ok(response)
+    }
 
 }
