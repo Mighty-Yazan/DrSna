@@ -111,7 +111,8 @@ data class LoginResponse(
     val tokenType: String = "Bearer",
     val userId: UUID?,
     val email: String,
-    val role: Role
+    val role: Role,
+    val isActive: Boolean,
 )
 
 // ── Profile ──────────────────────────────────────────────────────────
@@ -141,4 +142,17 @@ data class WalletResponse(
     val balance: java.math.BigDecimal = java.math.BigDecimal.ZERO,
     val currency: String = "JOD",
     val message: String = "Wallet feature is coming soon"
+)
+//  change password for the SuperAdmin
+data class ChangePasswordRequest(
+    @field:NotBlank(message = "New password is required")
+    @field:Size(min = 8, max = 12, message = "Password must be between 8 and 12 characters")
+    @field:Pattern(
+        regexp = "^(?=.*[0-9])(?=.*[^a-zA-Z0-9]).+$",
+        message = "Password must contain at least one number and one special character"
+    )
+    val newPassword: String,
+
+    @field:NotBlank(message = "Confirm password is required")
+    val confirmPassword: String
 )
