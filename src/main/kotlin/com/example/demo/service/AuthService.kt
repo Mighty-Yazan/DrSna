@@ -115,7 +115,8 @@ class AuthService(
             email = normalizedEmail,
             password = passwordEncoder.encode(request.password)!!,
             city = request.city,
-            role = Role.ADMIN
+            role = Role.ADMIN,
+            isActive = false,
         )
 
         val savedAdmin = userRepository.save(newAdmin)
@@ -134,7 +135,7 @@ class AuthService(
         val user = userRepository.findByEmail(normalizedEmail)
             .orElseThrow { InvalidCredentialsException("Invalid email or password") }
 
-        if (!user.isActive) {
+        if (!user.isActive && user.role != Role.ADMIN) {
             throw InvalidCredentialsException("Account is inactive")
         }
 
@@ -149,7 +150,8 @@ class AuthService(
             token = token,
             userId = user.id,
             email = user.email,
-            role = user.role
+            role = user.role,
+            isActive = user.isActive
         )
         return Pair(loginResponse, refreshToken)
     }
@@ -165,7 +167,8 @@ class AuthService(
             token = token,
             userId = user.id,
             email = user.email,
-            role = user.role
+            role = user.role,
+            isActive = user.isActive
         )
     }
 

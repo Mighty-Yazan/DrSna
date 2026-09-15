@@ -111,7 +111,8 @@ data class LoginResponse(
     val tokenType: String = "Bearer",
     val userId: UUID?,
     val email: String,
-    val role: Role
+    val role: Role,
+    val isActive: Boolean,
 )
 
 // ── Profile ──────────────────────────────────────────────────────────
