@@ -49,6 +49,7 @@ class PatientService(
         val clinics = clinicRepository.search(normalizedName, city, patient.city)
 
         return clinics.asSequence()
+            .filter { clinic -> clinic.applicationStatus == ClinicApplicationStatus.APPROVED }
             .filter { clinic ->
                 normalizedService == null || clinicSpecialtyRepository.findAllByClinicId(clinic.id!!).any { it.specialty?.name?.equals(normalizedService, ignoreCase = true) == true }
             }
@@ -328,7 +329,9 @@ class PatientService(
         val clinic = clinicRepository.findById(clinicId)
             .orElseThrow { ResourceNotFoundException("Clinic not found with ID: $clinicId") }
 
-        requireOperationalClinic(clinic)
+        if (clinic.applicationStatus != ClinicApplicationStatus.APPROVED) {
+            throw AppException("Appointments can only be booked with approved clinics")
+        }
 
         val doctor = userRepository.findById(doctorId)
             .orElseThrow { ResourceNotFoundException("Doctor not found with ID: $doctorId") }

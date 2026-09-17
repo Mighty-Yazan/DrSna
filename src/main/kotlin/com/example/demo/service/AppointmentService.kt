@@ -30,6 +30,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
+import com.example.demo.model.ClinicApplicationStatus
 
 @Service
 class AppointmentService(
@@ -1240,6 +1241,7 @@ class AppointmentService(
                     clinicUser.id!!
                 )
                 .orElse(null)
+        val isClosed = clinicEntity?.applicationStatus == ClinicApplicationStatus.REJECTED || clinicUser.isActive == false
 
         return AppointmentSummaryResponse(
 
@@ -1277,7 +1279,9 @@ class AppointmentService(
                     .atZone(zoneId)
                     .toOffsetDateTime(),
 
-            status = status
+            status =
+                status,
+            isClinicClosed = isClosed
         )
     }
 }

@@ -250,24 +250,48 @@ class SuperAdminService(
         return saved.toResponse()
     }
 
+
+
+
     @Transactional
     fun removeClinic(adminEmail: String, clinicId: UUID) {
         val clinic = getClinic(clinicId)
         val clinicUser = clinic.user ?: throw AppException("Clinic is missing its user")
 
-        /*
-         * A clinic is referenced by appointments, reviews, schedules, and
-         * admin history. Deactivating it preserves those records and avoids
-         * deleting doctors who may belong to other clinics.
-         */
-        clinic.applicationStatus = ClinicApplicationStatus.REMOVED
+        // 1. Deactivate login access
         clinicUser.isActive = false
-
-        clinicRepository.save(clinic)
         userRepository.save(clinicUser)
-        logActivity(adminEmail, "REMOVE_CLINIC", "Clinic '${clinic.clinicName}' was removed", clinicId)
-    }
 
+        // 2. Mark application status as REJECTED (existing column)
+        clinic.applicationStatus = ClinicApplicationStatus.REJECTED
+        clinic.rejectionReason = "Clinic decommissioned and permanently removed by platform administrator."
+        clinicRepository.save(clinic)
+
+        // 3. Cancel upcoming appointments using existing fields ONLY
+        val now = Instant.now()
+        val upcomingAppointments = appointmentRepository
+            .findAllByClinic_IdAndAppointmentDateGreaterThanEqualOrderByAppointmentDateAsc(clinicUserId, now)
+            .filter { it.status == AppointmentStatus.PENDING || it.status == AppointmentStatus.CONFIRMED }
+
+        upcomingAppointments.forEach { appointment ->
+            appointment.status = AppointmentStatus.CANCELLED
+            appointment.bookingKey = null
+        }
+        appointmentRepository.saveAll(upcomingAppointments)
+
+        // 4. Delete operating hours and shifts for this clinic
+        scheduleRepository.deleteAllByClinicId(clinic.id!!)
+
+        // 5. Disassociate doctors from this clinic
+        clinicDoctorRepository.deleteAllByClinic_Id(clinicUserId)
+
+        logActivity(
+            adminEmail,
+            "REMOVE_CLINIC",
+            "Clinic '${clinic.clinicName}' was decommissioned; ${upcomingAppointments.size} upcoming appointments cancelled.",
+            clinicId
+        )
+    }
     private fun getClinicsInternal(
         search: String?,
         city: City?,
