@@ -254,33 +254,18 @@ class SuperAdminService(
     fun removeClinic(adminEmail: String, clinicId: UUID) {
         val clinic = getClinic(clinicId)
         val clinicUser = clinic.user ?: throw AppException("Clinic is missing its user")
-        val clinicUserId = clinicUser.id ?: throw AppException("Clinic user has no ID")
 
-        val clinicDoctors = clinicDoctorRepository.findAllByClinic_Id(clinicUserId)
-            .mapNotNull { it.doctor?.id }
+        /*
+         * A clinic is referenced by appointments, reviews, schedules, and
+         * admin history. Deactivating it preserves those records and avoids
+         * deleting doctors who may belong to other clinics.
+         */
+        clinic.applicationStatus = ClinicApplicationStatus.REMOVED
+        clinicUser.isActive = false
 
-        // Permanent delete: remove dependent records first.
-        reviewRepository.deleteAllByClinicId(clinic.id!!)
-        appointmentRepository.deleteAllByClinic_Id(clinic.id!!)
-        insuranceCompanyRepository.deleteAllByClinicId(clinic.id!!)
-        clinicSpecialtyRepository.deleteAllByClinicId(clinic.id!!)
-        scheduleRepository.deleteAllByClinicId(clinic.id!!)
-        clinicDoctorRepository.deleteAllByClinic_Id(clinicUserId)
-
-        clinicDoctors.forEach { doctorId ->
-            // Delete doctor only when no other clinic still owns/uses the doctor.
-            if (clinicDoctorRepository.findAllByDoctor_Id(doctorId).isEmpty()) {
-                favoriteDoctorRepository.deleteAllByDoctorId(doctorId)
-                scheduleRepository.deleteAllByDoctor_Id(doctorId)
-                appointmentRepository.deleteAllByDoctor_Id(doctorId)
-                userRepository.deleteById(doctorId)
-            }
-        }
-
-        val clinicName = clinic.clinicName
-        clinicRepository.delete(clinic)
-        userRepository.delete(clinicUser)
-        logActivity(adminEmail, "REMOVE_CLINIC", "Clinic '$clinicName' was permanently removed", clinicId)
+        clinicRepository.save(clinic)
+        userRepository.save(clinicUser)
+        logActivity(adminEmail, "REMOVE_CLINIC", "Clinic '${clinic.clinicName}' was removed", clinicId)
     }
 
     private fun getClinicsInternal(

@@ -212,6 +212,6 @@ class ClinicAdminController(
         @PathVariable doctorId: UUID
     ): ResponseEntity<MessageResponse> {
         clinicAdminService.deleteDoctor(authentication.name, doctorId)
-        return ResponseEntity.ok(MessageResponse("Doctor deleted successfully from your clinic"))
+        return ResponseEntity.ok(MessageResponse("Doctor removed successfully from your clinic"))
     }
 }

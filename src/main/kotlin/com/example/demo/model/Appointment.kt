@@ -91,6 +91,13 @@ class Appointment(
     @Column(name = "form_patient_age")
     var formPatientAge: Int? = null,
 
+    /*
+     * Reason provided when an appointment is cancelled.
+     * Used to inform the patient if cancelled due to doctor removal or other reasons.
+     */
+    @Column(name = "cancellation_reason", length = 255)
+    var cancellationReason: String? = null,
+
     @Column(name = "created_at", nullable = false, updatable = false)
     val createdAt: Instant = Instant.now()
 )

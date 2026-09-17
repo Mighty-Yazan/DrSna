@@ -18,8 +18,8 @@ spring:
 
 admin:
   seed:
-      enabled: ${ADMIN_SEED_ENABLED:false}
-      full-name: ${ADMIN_SEED_FULL_NAME}
-      email: ${ADMIN_SEED_EMAIL}
-      password: ${ADMIN_SEED_PASSWORD}
-      city: ${ADMIN_SEED_CITY}
+    enabled: ${ADMIN_SEED_ENABLED:true}
+    full-name: ${ADMIN_SEED_FULL_NAME}
+    email: ${ADMIN_SEED_EMAIL}
+    password: ${ADMIN_SEED_PASSWORD}
+    city: ${ADMIN_SEED_CITY}
