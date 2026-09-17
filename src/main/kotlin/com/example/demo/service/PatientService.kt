@@ -2,6 +2,7 @@ package com.example.demo.service
 
 import com.example.demo.dto.*
 import com.example.demo.exception.AppException
+import com.example.demo.exception.ClinicNotOperationalException
 import com.example.demo.exception.DuplicateResourceException
 import com.example.demo.exception.ResourceNotFoundException
 import com.example.demo.model.*
@@ -143,6 +144,8 @@ class PatientService(
         val clinic = clinicRepository.findById(clinicId)
             .orElseThrow { ResourceNotFoundException("Clinic not found") }
 
+        requireOperationalClinic(clinic)
+
         val clinicUserId = clinic.user?.id ?: throw AppException("Clinic user not found")
         println("[DEBUG-AVAIL] clinicUserId=$clinicUserId")
 
@@ -252,7 +255,7 @@ class PatientService(
 
                 val available =
                     !endsAfterShift &&
-                    instant.isAfter(now) &&
+                            instant.isAfter(now) &&
                             !hasAppointmentOverlap(
                                 bookedAppointments,
                                 instant,
@@ -333,6 +336,10 @@ class PatientService(
         val doctor = userRepository.findById(doctorId)
             .orElseThrow { ResourceNotFoundException("Doctor not found with ID: $doctorId") }
 
+        if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinic.user!!.id!!, doctorId)) {
+            throw AppException("Doctor is not associated with the selected clinic")
+        }
+
         val specialtiesList = specialtyRepository.findAllById(serviceIdsReq)
         if (specialtiesList.size != serviceIdsReq.size) {
             throw ResourceNotFoundException("One or more selected services were not found")
@@ -380,10 +387,6 @@ class PatientService(
 
         if (schedule.clinic?.id != clinicId || schedule.doctor?.id != doctorId) {
             throw AppException("Schedule does not belong to the selected clinic and doctor")
-        }
-
-        if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinic.user!!.id!!, doctorId)) {
-            throw AppException("Doctor is not associated with the selected clinic")
         }
 
         val schedules = scheduleRepository.findByClinicId(clinicId)
@@ -518,6 +521,13 @@ class PatientService(
         clinic.rating = if (reviews.isEmpty()) java.math.BigDecimal.ZERO else reviews.map { it.rating }.average().toBigDecimal().setScale(1, java.math.RoundingMode.HALF_UP)
         clinicRepository.save(clinic)
     }
+
+    private fun requireOperationalClinic(clinic: Clinic) {
+        if (clinic.applicationStatus != ClinicApplicationStatus.APPROVED || clinic.user?.isActive != true) {
+            throw ClinicNotOperationalException("This clinic is not available for bookings at the moment.")
+        }
+    }
+
     private fun hasAnyAvailableSlot(clinicId: UUID, date: LocalDate): Boolean {
         if (date.isBefore(LocalDate.now(zoneId))) return false
 

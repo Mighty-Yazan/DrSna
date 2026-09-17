@@ -20,4 +20,7 @@ interface ScheduleRepository : JpaRepository<Schedule, Long> {
     fun deleteByClinicIdAndTypeAndDayOfWeek(clinicId: UUID, type: ScheduleType, dayOfWeek: DayOfWeek)
     fun deleteAllByDoctor_Id(doctorId: UUID)
     fun deleteAllByClinicId(clinicId: UUID)
+
+    // الدالة المضافة لحذف كافة شفتات الطبيب المرتبطة بهذه العيادة فقط
+    fun deleteByClinicIdAndDoctor_Id(clinicId: UUID, doctorId: UUID)
 }

@@ -9,22 +9,22 @@ import com.example.demo.repository.*
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Instant
 import java.util.UUID
 
 @Service
 @Transactional
 class ClinicAdminService(
     private val clinicRepository: ClinicRepository,
-
     private val userRepository: UserRepository,
     private val clinicDoctorRepository: ClinicDoctorRepository,
     private val passwordEncoder: PasswordEncoder,
     private val specialtyRepository: SpecialtyRepository,
     private val clinicSpecialtyRepository: ClinicSpecialtyRepository,
     private val reviewRepository: ReviewRepository,
-    private val appointmentRepository: AppointmentRepository,
+    private val insuranceCompanyRepository: InsuranceCompanyRepository,
     private val scheduleRepository: ScheduleRepository,
-    private val insuranceCompanyRepository: InsuranceCompanyRepository
+    private val appointmentRepository: AppointmentRepository
 ) {
     // ── CLINIC PROFILE ──────────────────────────────────────────────────
 
@@ -86,7 +86,7 @@ class ClinicAdminService(
             if (request.password != request.confirmPassword) {
                 throw AppException("Passwords do not match")
             }
-            user.password = passwordEncoder.encode(request.password!!)!!
+            user.password = passwordEncoder.encode(request.password)!!
         }
 
         user.fullName = request.clinicName.trim()
@@ -100,7 +100,7 @@ class ClinicAdminService(
             }
             user.clinicLicenseNumber = newLicenseNumber
         }
-        
+
         clinic.applicationStatus = ClinicApplicationStatus.PENDING
         clinic.rejectionReason = null
 
@@ -109,9 +109,6 @@ class ClinicAdminService(
 
         return updatedClinic.toResponse()
     }
-
-
-
 
     fun addSpecialty(userEmail: String, request: SpecialtyRequest): SpecialtyResponse {
         val clinic = getOrCreateClinic(userEmail)
@@ -153,7 +150,7 @@ class ClinicAdminService(
     @Transactional(readOnly = true)
     fun getAllSpecialties(): List<SpecialtyResponse> {
         return specialtyRepository.findAll().map {
-            SpecialtyResponse(it.id!!, it.name, 60) // Default duration for unselected
+            SpecialtyResponse(it.id!!, it.name, 60)
         }
     }
 
@@ -230,7 +227,7 @@ class ClinicAdminService(
         request: InsuranceCompanyRequest
     ): InsuranceCompanyResponse {
         val clinic = getOrCreateClinic(userEmail)
-        
+
         val insuranceCompany = insuranceCompanyRepository.findById(insuranceId)
             .orElseThrow { ResourceNotFoundException("Insurance company not found with ID: $insuranceId") }
 
@@ -279,7 +276,19 @@ class ClinicAdminService(
             .filter { doctorId == null || it.doctor?.id == doctorId }
             .filter { rating == null || it.rating == rating }
             .map { review ->
-                ReviewResponse(review.id!!, review.appointment!!.id!!, review.patient!!.id!!, review.patient!!.fullName, review.doctor!!.id!!, review.doctor!!.fullName, review.rating, review.comment, review.reply, review.replyAt?.atZone(java.time.ZoneId.of("UTC"))?.toOffsetDateTime(), review.createdAt.atZone(java.time.ZoneId.of("UTC")).toOffsetDateTime())
+                ReviewResponse(
+                    review.id!!,
+                    review.appointment!!.id!!,
+                    review.patient!!.id!!,
+                    review.patient!!.fullName,
+                    review.doctor!!.id!!,
+                    review.doctor!!.fullName,
+                    review.rating,
+                    review.comment,
+                    review.reply,
+                    review.replyAt?.atZone(java.time.ZoneId.of("UTC"))?.toOffsetDateTime(),
+                    review.createdAt.atZone(java.time.ZoneId.of("UTC")).toOffsetDateTime()
+                )
             }.toList()
     }
 
@@ -291,7 +300,19 @@ class ClinicAdminService(
         review.reply = request.reply.trim()
         review.replyAt = java.time.Instant.now()
         val saved = reviewRepository.save(review)
-        return ReviewResponse(saved.id!!, saved.appointment!!.id!!, saved.patient!!.id!!, saved.patient!!.fullName, saved.doctor!!.id!!, saved.doctor!!.fullName, saved.rating, saved.comment, saved.reply, saved.replyAt?.atZone(java.time.ZoneId.of("UTC"))?.toOffsetDateTime(), saved.createdAt.atZone(java.time.ZoneId.of("UTC")).toOffsetDateTime())
+        return ReviewResponse(
+            saved.id!!,
+            saved.appointment!!.id!!,
+            saved.patient!!.id!!,
+            saved.patient!!.fullName,
+            saved.doctor!!.id!!,
+            saved.doctor!!.fullName,
+            saved.rating,
+            saved.comment,
+            saved.reply,
+            saved.replyAt?.atZone(java.time.ZoneId.of("UTC"))?.toOffsetDateTime(),
+            saved.createdAt.atZone(java.time.ZoneId.of("UTC")).toOffsetDateTime()
+        )
     }
 
     // ── DOCTORS MANAGEMENT ──────────────────────────────────────────────
@@ -306,7 +327,6 @@ class ClinicAdminService(
     }
 
     fun addDoctor(clinicEmail: String, request: AddDoctorRequest): DoctorResponse {
-        // 1. التأكد من وجود العيادة وحفظها أولاً لتفادي خطأ Foreign Key
         val clinic = getOrCreateClinic(clinicEmail)
         val clinicUser = clinic.user ?: throw IllegalStateException("Clinic missing linked user")
 
@@ -314,7 +334,6 @@ class ClinicAdminService(
             throw DuplicateResourceException("User with email '${request.email}' already exists")
         }
 
-        // 2. إنشاء حساب الطبيب وتشفير الباسورد
         val doctorUser = userRepository.save(
             User(
                 fullName = request.fullName.trim(),
@@ -328,7 +347,6 @@ class ClinicAdminService(
             )
         )
 
-        // 3. ربطه بالعيادة في جدول clinic_doctors
         val clinicDoctor = ClinicDoctor(
             id = ClinicDoctorId(doctorUserId = doctorUser.id!!, clinicUserId = clinicUser.id!!),
             doctor = doctorUser,
@@ -387,50 +405,64 @@ class ClinicAdminService(
         return saved.toDoctorResponse()
     }
 
+    @Transactional
     fun deleteDoctor(
         clinicEmail: String,
         doctorUserId: UUID
     ) {
+        val clinic = getOrCreateClinic(clinicEmail)
+        val clinicUserId = clinic.user?.id
+            ?: throw IllegalStateException("Clinic missing linked user")
+        val clinicId = clinic.id
+            ?: throw IllegalStateException("Clinic missing ID")
 
-        val clinic =
-            getOrCreateClinic(clinicEmail)
-
-        val clinicUserId =
-            clinic.user!!.id!!
-
-        val clinicDoctorId =
-            ClinicDoctorId(
-                doctorUserId = doctorUserId,
-                clinicUserId = clinicUserId
-            )
-
-        if (
-            !clinicDoctorRepository
-                .existsById(clinicDoctorId)
-        ) {
-            throw ResourceNotFoundException(
-                "Doctor not found in your clinic catalog"
-            )
-        }
-
-        /*
-         * First, remove the relationship between the doctor and this clinic.
-         */
-        clinicDoctorRepository.deleteById(
-            clinicDoctorId
+        val clinicDoctorId = ClinicDoctorId(
+            doctorUserId = doctorUserId,
+            clinicUserId = clinicUserId
         )
 
-        /*
-         * Delete all appointments and schedules associated with the doctor
-         */
-        appointmentRepository.deleteAllByDoctor_Id(doctorUserId)
-        scheduleRepository.deleteAllByDoctor_Id(doctorUserId)
+        if (!clinicDoctorRepository.existsById(clinicDoctorId)) {
+            throw ResourceNotFoundException("Doctor not found in your clinic catalog")
+        }
 
-        /*
-         * Then delete the actual user record from the database,
-         * as requested by the frontend team.
-         */
-        userRepository.deleteById(doctorUserId)
+        val now = Instant.now()
+
+        // 1. جلب كافة مواعيد هذا الطبيب بالعيادة وفك ارتباطها بجدول المواعيد وبالطبيب
+        val allDoctorAppointments = appointmentRepository
+            .findAllByClinic_IdAndDoctor_Id(clinicUserId, doctorUserId)
+
+        allDoctorAppointments.forEach { appointment ->
+            val appDate = appointment.appointmentDate
+
+            // إلغاء المواعيد القادمة النشطة وتثبيت السبب للمريض
+            if (appDate != null && appDate >= now &&
+                (appointment.status == AppointmentStatus.PENDING || appointment.status == AppointmentStatus.CONFIRMED)
+            ) {
+                appointment.status = AppointmentStatus.CANCELLED
+                appointment.bookingKey = null
+                appointment.cancellationReason = "تم إلغاء الموعد لأن الطبيب لم يعد موجوداً في هذه العيادة"
+            }
+
+            // فك ارتباط الموعد بالجدول والطبيب لتسليك الحذف في قاعدة البيانات
+            appointment.schedule = null
+            appointment.doctor = null
+        }
+
+        appointmentRepository.saveAllAndFlush(allDoctorAppointments)
+
+        // 2. فك ارتباط التقييمات إن وجدت
+        val reviews = reviewRepository.findAllByClinicIdOrderByCreatedAtDesc(clinicId)
+            .filter { it.doctor?.id == doctorUserId }
+        if (reviews.isNotEmpty()) {
+            reviews.forEach { it.doctor = null }
+            reviewRepository.saveAllAndFlush(reviews)
+        }
+
+        // 3. حذف جدول وشفتات عمل الطبيب بالعيادة
+        scheduleRepository.deleteByClinicIdAndDoctor_Id(clinicId, doctorUserId)
+
+        // 4. إزالة الطبيب من قائمة أطباء العيادة
+        clinicDoctorRepository.deleteById(clinicDoctorId)
     }
 
     // ── REUSABLE HELPERS ────────────────────────────────────────────────
@@ -464,7 +496,6 @@ class ClinicAdminService(
         applicationStatus = this.applicationStatus,
         rejectionReason = this.rejectionReason
     )
-
 
     private fun User.toDoctorResponse() = DoctorResponse(
         doctorUserId = this.id!!,

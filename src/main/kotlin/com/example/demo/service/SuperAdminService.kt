@@ -257,7 +257,6 @@ class SuperAdminService(
     fun removeClinic(adminEmail: String, clinicId: UUID) {
         val clinic = getClinic(clinicId)
         val clinicUser = clinic.user ?: throw AppException("Clinic is missing its user")
-        val clinicUserId = clinicUser.id ?: throw AppException("Clinic user has no ID")
 
         // 1. Deactivate login access
         clinicUser.isActive = false

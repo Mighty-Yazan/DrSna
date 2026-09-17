@@ -12,6 +12,8 @@ import com.example.demo.exception.DuplicateResourceException
 import com.example.demo.exception.ResourceNotFoundException
 import com.example.demo.model.Appointment
 import com.example.demo.model.AppointmentStatus
+import com.example.demo.model.Clinic
+import com.example.demo.model.ClinicApplicationStatus
 import com.example.demo.model.Schedule
 import com.example.demo.model.ScheduleType
 import com.example.demo.repository.AppointmentRepository
@@ -39,7 +41,6 @@ class AppointmentService(
     private val scheduleRepository: ScheduleRepository,
     private val specialtyRepository: SpecialtyRepository,
     private val clinicSpecialtyRepository: com.example.demo.repository.ClinicSpecialtyRepository
-
 ) {
 
     private val zoneId = ZoneId.of("UTC")
@@ -49,11 +50,6 @@ class AppointmentService(
     // POST /api/appointments/book
     // ============================================================
 
-    /**
-     * Receives booking data from the Frontend Appointment Form and saves it.
-     * Fields: patientName, patientAge, serviceId, appointmentAt, paymentMethod.
-     * Returns a confirmation response with the generated appointmentId.
-     */
     @Transactional
     fun bookAppointment(authentication: org.springframework.security.core.Authentication?, request: BookAppointmentRequest): BookAppointmentResponse {
         if (request.patientAge < 6) {
@@ -63,7 +59,6 @@ class AppointmentService(
         val date = request.appointmentAt.toLocalDate()
         val time = request.appointmentAt.toLocalTime()
 
-        // 1. Validate that appointmentAt is in the future
         val appointmentInstant = request.appointmentAt
             .atZone(zoneId)
             .toInstant()
@@ -72,18 +67,17 @@ class AppointmentService(
             throw AppException("Appointment date and time must be in the future")
         }
 
-        // 2. Fetch dependencies
         val clinicEntity = clinicRepository.findById(request.clinicId)
             .orElseThrow { ResourceNotFoundException("Clinic with ID '${request.clinicId}' was not found") }
-        
-        if (clinicEntity.applicationStatus != com.example.demo.model.ClinicApplicationStatus.APPROVED || clinicEntity.user?.isActive != true) {
-            throw com.example.demo.exception.ClinicNotOperationalException("This clinic is not available for bookings at the moment.")
-        }
-        
+
+        requireOperationalClinic(clinicEntity)
+
         val clinicUser = clinicEntity.user!!
 
         val doctorUser = userRepository.findById(request.doctorId)
             .orElseThrow { ResourceNotFoundException("Doctor with ID '${request.doctorId}' was not found") }
+
+        requireDoctorAssociation(clinicEntity.user!!.id!!, doctorUser.id!!)
 
         val serviceIds = request.serviceIds.distinct()
         val specialtiesList = specialtyRepository.findAllById(serviceIds)
@@ -108,7 +102,6 @@ class AppointmentService(
             userRepository.findByEmail(email).orElse(null)
         }
 
-        // 3. Build booking key & check for duplicate slot upfront
         val bookingKey = buildBookingKey(doctorUser.id!!, appointmentInstant)
         if (appointmentRepository.existsByBookingKey(bookingKey)) {
             throw DuplicateResourceException(
@@ -132,7 +125,6 @@ class AppointmentService(
             )
         }
 
-        // 4. Build Appointment entity
         val appointment = Appointment(
             clinic          = clinicUser,
             doctor          = doctorUser,
@@ -150,10 +142,8 @@ class AppointmentService(
         val doctorSchedule = this.validateAppointmentSlot(appointment, date, time)
         appointment.schedule = doctorSchedule
 
-        // 5. Use saveSafely to handle concurrency/race conditions gracefully
         val saved = saveSafely(appointment)
 
-        // 6. Return confirmation response
         return BookAppointmentResponse(
             appointmentId  = saved.id!!,
             message        = "Appointment Created Successfully",
@@ -167,6 +157,7 @@ class AppointmentService(
             status         = saved.status
         )
     }
+
     // ============================================================
     // PATIENT
     // ============================================================
@@ -293,8 +284,6 @@ class AppointmentService(
         ensureCancellable(appointment)
 
         appointment.status = AppointmentStatus.CANCELLED
-
-        // Free the slot while keeping the appointment history.
         appointment.bookingKey = null
 
         appointmentRepository.save(appointment)
@@ -322,18 +311,12 @@ class AppointmentService(
                 )
             }
 
-        // A specific date takes priority over scope (used by the doctor's day view)
         if (date != null) {
 
             requireDateNotPast(date)
 
-            val from =
-                date.atStartOfDay(zoneId).toInstant()
-
-            val to =
-                date.plusDays(1)
-                    .atStartOfDay(zoneId)
-                    .toInstant()
+            val from = date.atStartOfDay(zoneId).toInstant()
+            val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
 
             return appointmentRepository
                 .findAllByDoctorIdAndAppointmentDateBetween(
@@ -349,7 +332,6 @@ class AppointmentService(
                 }
         }
 
-        // ── Appointments (upcoming) / History Appointment (past) / all ──
         val normalizedScope =
             scope.trim().lowercase().ifEmpty {
                 "upcoming"
@@ -416,8 +398,7 @@ class AppointmentService(
                     )
                 }
 
-        val clinicUserId =
-            clinic.user!!.id!!
+        val clinicUserId = clinic.user!!.id!!
 
         var appointments =
             if (startDate != null && endDate != null) {
@@ -455,20 +436,8 @@ class AppointmentService(
                     )
             }
 
+        // فلترة المواعيد بحسب المعالج للسماح باسترجاع المواعيد التاريخية للأطباء المزالين
         if (doctorId != null) {
-
-            if (
-                !clinicDoctorRepository
-                    .existsByClinic_IdAndDoctor_Id(
-                        clinicUserId,
-                        doctorId
-                    )
-            ) {
-                throw ResourceNotFoundException(
-                    "Doctor is not associated with this clinic"
-                )
-            }
-
             appointments =
                 appointments.filter {
                     it.doctor?.id == doctorId
@@ -502,6 +471,7 @@ class AppointmentService(
                 }
 
         val clinicUserId = clinic.user!!.id!!
+        requireOperationalClinic(clinic)
         val doctorId = request.doctorId ?: throw AppException("Doctor ID is required")
         val date = request.appointmentDate ?: throw AppException("Appointment date is required")
         val time = request.appointmentTime ?: throw AppException("Appointment time is required")
@@ -524,7 +494,7 @@ class AppointmentService(
 
         val specialtiesList =
             if (!request.serviceIds.isNullOrEmpty()) {
-                clinicSpecialtyRepository.findAllByClinicId(clinicUserId).filter {
+                clinicSpecialtyRepository.findAllByClinicId(clinic.id!!).filter {
                     it.specialty?.id in request.serviceIds
                 }
             } else {
@@ -544,7 +514,7 @@ class AppointmentService(
             schedule = null,
             appointmentDate = date.atTime(time).atZone(zoneId).toInstant(),
             durationMinutes = serviceDurationMinutes,
-            status = AppointmentStatus.CONFIRMED, // Walk-in is automatically confirmed
+            status = AppointmentStatus.CONFIRMED,
             bookingKey = null
         )
 
@@ -605,7 +575,7 @@ class AppointmentService(
                 getClinicAppointments(
                     email,
                     date,
-                    null, // endDate
+                    null,
                     doctorId,
                     status
                 )
@@ -684,8 +654,7 @@ class AppointmentService(
                 appointmentId
             )
 
-        val newStatus =
-            request.status
+        val newStatus = request.status
 
         validateStatusTransition(
             appointment.status,
@@ -693,14 +662,12 @@ class AppointmentService(
         )
 
         if (
-            newStatus ==
-            AppointmentStatus.CANCELLED
+            newStatus == AppointmentStatus.CANCELLED
         ) {
             appointment.bookingKey = null
         }
 
-        appointment.status =
-            newStatus
+        appointment.status = newStatus
 
         return saveSafely(
             appointment
@@ -725,8 +692,7 @@ class AppointmentService(
             )
 
         if (
-            appointment.status ==
-            AppointmentStatus.CANCELLED
+            appointment.status == AppointmentStatus.CANCELLED
         ) {
             throw AppException(
                 "Cancelled appointments cannot be rescheduled"
@@ -734,8 +700,7 @@ class AppointmentService(
         }
 
         if (
-            appointment.status ==
-            AppointmentStatus.COMPLETED
+            appointment.status == AppointmentStatus.COMPLETED
         ) {
             throw AppException(
                 "Completed appointments cannot be rescheduled"
@@ -807,11 +772,8 @@ class AppointmentService(
             )
         }
 
-        appointment.appointmentDate =
-            newInstant
-
-        appointment.bookingKey =
-            newBookingKey
+        appointment.appointmentDate = newInstant
+        appointment.bookingKey = newBookingKey
 
         return saveSafely(
             appointment
@@ -833,13 +795,8 @@ class AppointmentService(
 
                 requireDateNotPast(date)
 
-                val from =
-                    date.atStartOfDay(zoneId).toInstant()
-
-                val to =
-                    date.plusDays(1)
-                        .atStartOfDay(zoneId)
-                        .toInstant()
+                val from = date.atStartOfDay(zoneId).toInstant()
+                val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
 
                 appointmentRepository
                     .findAllByDoctorIdAndAppointmentDateBetween(
@@ -859,8 +816,7 @@ class AppointmentService(
 
         return appointments
             .filter {
-                status == null ||
-                        it.status == status
+                status == null || it.status == status
             }
             .sortedBy {
                 it.appointmentDate
@@ -881,13 +837,8 @@ class AppointmentService(
 
                 requireDateNotPast(date)
 
-                val from =
-                    date.atStartOfDay(zoneId).toInstant()
-
-                val to =
-                    date.plusDays(1)
-                        .atStartOfDay(zoneId)
-                        .toInstant()
+                val from = date.atStartOfDay(zoneId).toInstant()
+                val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
 
                 appointmentRepository
                     .findAllByPatient_IdAndAppointmentDateGreaterThanEqualOrderByAppointmentDateAsc(
@@ -908,8 +859,7 @@ class AppointmentService(
 
         return appointments
             .filter {
-                status == null ||
-                        it.status == status
+                status == null || it.status == status
             }
             .sortedBy {
                 it.appointmentDate
@@ -942,8 +892,7 @@ class AppointmentService(
                 }
 
         if (
-            appointment.clinic?.id !=
-            clinic.user?.id
+            appointment.clinic?.id != clinic.user?.id
         ) {
             throw ResourceNotFoundException(
                 "Appointment not found with ID: $appointmentId"
@@ -1004,8 +953,7 @@ class AppointmentService(
     ) {
 
         if (
-            appointment.status ==
-            AppointmentStatus.CANCELLED
+            appointment.status == AppointmentStatus.CANCELLED
         ) {
             throw AppException(
                 "Appointment is already cancelled"
@@ -1013,8 +961,7 @@ class AppointmentService(
         }
 
         if (
-            appointment.status ==
-            AppointmentStatus.COMPLETED
+            appointment.status == AppointmentStatus.COMPLETED
         ) {
             throw AppException(
                 "Completed appointments cannot be cancelled"
@@ -1028,9 +975,7 @@ class AppointmentService(
                 )
 
         if (
-            !appointmentDate.isAfter(
-                Instant.now()
-            )
+            !appointmentDate.isAfter(Instant.now())
         ) {
             throw AppException(
                 "Appointment cannot be cancelled because it already started"
@@ -1082,15 +1027,15 @@ class AppointmentService(
                     )
                 }
 
-        val clinicId =
-            clinic.id!!
+        val clinicId = clinic.id!!
 
-        // Fetch all schedules for this clinic using existing ScheduleRepository method
+        requireOperationalClinic(clinic)
+        requireDoctorAssociation(clinicUserId, doctorId)
+
         val schedules =
             scheduleRepository
                 .findByClinicId(clinicId)
 
-        // ── 1. Check if Clinic is Open on this Day of the Week (CLINIC_HOURS) ──
         val dayOfWeek = date.dayOfWeek
         val clinicDaySchedule = schedules.firstOrNull {
             it.type == ScheduleType.CLINIC_HOURS && it.dayOfWeek == dayOfWeek
@@ -1101,7 +1046,6 @@ class AppointmentService(
             throw AppException("The clinic is closed on ${dayName}s")
         }
 
-        // Validate time is within clinic opening hours
         if (
             time.isBefore(clinicDaySchedule.startTime) ||
             time.plusMinutes(appointment.durationMinutes.toLong()).isAfter(clinicDaySchedule.endTime)
@@ -1109,7 +1053,6 @@ class AppointmentService(
             throw AppException("Selected time is outside the clinic's operating hours (${clinicDaySchedule.startTime} - ${clinicDaySchedule.endTime})")
         }
 
-        // ── 2. Check Clinic Specific Holiday ──
         val isClinicHoliday =
             scheduleRepository
                 .existsByClinicIdAndSpecificDateAndType(
@@ -1124,12 +1067,10 @@ class AppointmentService(
             )
         }
 
-        // ── 3. Check Doctor Holiday ──
         val isDoctorHoliday =
             schedules.any {
                 it.doctor?.id == doctorId &&
-                        it.type ==
-                        ScheduleType.HOLIDAY &&
+                        it.type == ScheduleType.HOLIDAY &&
                         it.specificDate == date
             }
 
@@ -1139,7 +1080,6 @@ class AppointmentService(
             )
         }
 
-        // ── 4. Check Doctor Shift (Date-specific or Recurring Day) ──
         val doctorSchedule =
             schedules.firstOrNull {
                 it.doctor?.id == doctorId &&
@@ -1173,9 +1113,7 @@ class AppointmentService(
                 .toInstant()
 
         if (
-            !newInstant.isAfter(
-                Instant.now()
-            )
+            !newInstant.isAfter(Instant.now())
         ) {
             throw AppException(
                 "Appointment date and time must be in the future"
@@ -1184,6 +1122,21 @@ class AppointmentService(
 
         return doctorSchedule
     }
+
+    private fun requireOperationalClinic(clinic: Clinic) {
+        if (clinic.applicationStatus != ClinicApplicationStatus.APPROVED || clinic.user?.isActive != true) {
+            throw com.example.demo.exception.ClinicNotOperationalException(
+                "This clinic is not available for bookings at the moment."
+            )
+        }
+    }
+
+    private fun requireDoctorAssociation(clinicUserId: UUID, doctorId: UUID) {
+        if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinicUserId, doctorId)) {
+            throw AppException("Doctor is not associated with the selected clinic")
+        }
+    }
+
     private fun isValidSlot(
         start: LocalTime,
         end: LocalTime,
@@ -1278,11 +1231,9 @@ class AppointmentService(
     // RESPONSE MAPPING
     // ============================================================
 
-    private fun Appointment.toSummary():
-            AppointmentSummaryResponse {
+    private fun Appointment.toSummary(): AppointmentSummaryResponse {
 
-        val clinicUser =
-            clinic!!
+        val clinicUser = clinic!!
 
         val clinicEntity =
             clinicRepository
@@ -1294,8 +1245,7 @@ class AppointmentService(
 
         return AppointmentSummaryResponse(
 
-            appointmentId =
-                id!!,
+            appointmentId = id!!,
 
             clinicId =
                 clinicEntity?.id
@@ -1305,26 +1255,19 @@ class AppointmentService(
                 clinicEntity?.clinicName
                     ?: clinicUser.fullName,
 
-            doctorId =
-                doctor!!.id!!,
+            doctorId = doctor!!.id!!,
 
-            doctorName =
-                doctor!!.fullName,
+            doctorName = doctor!!.fullName,
 
-            patientId =
-                patient?.id,
+            patientId = patient?.id,
 
-            patientName =
-                patient?.fullName,
+            patientName = patient?.fullName,
 
-            serviceIds =
-                specialties.mapNotNull { it.id },
+            serviceIds = specialties.mapNotNull { it.id },
 
-            serviceNames =
-                specialties.map { it.name },
+            serviceNames = specialties.map { it.name },
 
-            scheduleId =
-                schedule?.id,
+            scheduleId = schedule?.id,
 
             appointmentAt =
                 appointmentDate!!

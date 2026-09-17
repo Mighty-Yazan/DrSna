@@ -61,6 +61,11 @@ interface AppointmentRepository : JpaRepository<Appointment, UUID> {
         from: Instant
     ): List<Appointment>
 
+    fun findAllByClinic_IdAndDoctor_Id(
+        clinicId: UUID,
+        doctorId: UUID
+    ): List<Appointment>
+
     fun findAllByAppointmentDateBetween(
         from: Instant,
         to: Instant
