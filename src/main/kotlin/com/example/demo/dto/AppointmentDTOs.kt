@@ -22,7 +22,8 @@ data class AppointmentSummaryResponse(
     val scheduleId: Long?,
     val appointmentAt: OffsetDateTime,
     val createdAt: OffsetDateTime,
-    val status: AppointmentStatus
+    val status: AppointmentStatus,
+    val isClinicClosed: Boolean = false // in-memory flag
 )
 
 data class AppointmentListResponse(

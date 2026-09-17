@@ -250,39 +250,49 @@ class SuperAdminService(
         return saved.toResponse()
     }
 
+
+
+
     @Transactional
     fun removeClinic(adminEmail: String, clinicId: UUID) {
         val clinic = getClinic(clinicId)
         val clinicUser = clinic.user ?: throw AppException("Clinic is missing its user")
         val clinicUserId = clinicUser.id ?: throw AppException("Clinic user has no ID")
 
-        val clinicDoctors = clinicDoctorRepository.findAllByClinic_Id(clinicUserId)
-            .mapNotNull { it.doctor?.id }
+        // 1. Deactivate login access
+        clinicUser.isActive = false
+        userRepository.save(clinicUser)
 
-        // Permanent delete: remove dependent records first.
-        reviewRepository.deleteAllByClinicId(clinic.id!!)
-        appointmentRepository.deleteAllByClinic_Id(clinic.id!!)
-        insuranceCompanyRepository.deleteAllByClinicId(clinic.id!!)
-        clinicSpecialtyRepository.deleteAllByClinicId(clinic.id!!)
+        // 2. Mark application status as REJECTED (existing column)
+        clinic.applicationStatus = ClinicApplicationStatus.REJECTED
+        clinic.rejectionReason = "Clinic decommissioned and permanently removed by platform administrator."
+        clinicRepository.save(clinic)
+
+        // 3. Cancel upcoming appointments using existing fields ONLY
+        val now = Instant.now()
+        val upcomingAppointments = appointmentRepository
+            .findAllByClinic_IdAndAppointmentDateGreaterThanEqualOrderByAppointmentDateAsc(clinicUserId, now)
+            .filter { it.status == AppointmentStatus.PENDING || it.status == AppointmentStatus.CONFIRMED }
+
+        upcomingAppointments.forEach { appointment ->
+            appointment.status = AppointmentStatus.CANCELLED
+            appointment.bookingKey = null
+        }
+        appointmentRepository.saveAll(upcomingAppointments)
+
+        // 4. Delete operating hours and shifts for this clinic
         scheduleRepository.deleteAllByClinicId(clinic.id!!)
+
+        // 5. Disassociate doctors from this clinic
         clinicDoctorRepository.deleteAllByClinic_Id(clinicUserId)
 
-        clinicDoctors.forEach { doctorId ->
-            // Delete doctor only when no other clinic still owns/uses the doctor.
-            if (clinicDoctorRepository.findAllByDoctor_Id(doctorId).isEmpty()) {
-                favoriteDoctorRepository.deleteAllByDoctorId(doctorId)
-                scheduleRepository.deleteAllByDoctor_Id(doctorId)
-                appointmentRepository.deleteAllByDoctor_Id(doctorId)
-                userRepository.deleteById(doctorId)
-            }
-        }
-
-        val clinicName = clinic.clinicName
-        clinicRepository.delete(clinic)
-        userRepository.delete(clinicUser)
-        logActivity(adminEmail, "REMOVE_CLINIC", "Clinic '$clinicName' was permanently removed", clinicId)
+        logActivity(
+            adminEmail,
+            "REMOVE_CLINIC",
+            "Clinic '${clinic.clinicName}' was decommissioned; ${upcomingAppointments.size} upcoming appointments cancelled.",
+            clinicId
+        )
     }
-
     private fun getClinicsInternal(
         search: String?,
         city: City?,
