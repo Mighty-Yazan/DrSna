@@ -250,24 +250,22 @@ class SuperAdminService(
         return saved.toResponse()
     }
 
-
-
-
     @Transactional
     fun removeClinic(adminEmail: String, clinicId: UUID) {
         val clinic = getClinic(clinicId)
         val clinicUser = clinic.user ?: throw AppException("Clinic is missing its user")
+        val clinicUserId = clinicUser.id ?: throw AppException("Clinic user has no ID")
 
         // 1. Deactivate login access
         clinicUser.isActive = false
         userRepository.save(clinicUser)
 
-        // 2. Mark application status as REJECTED (existing column)
+        // 2. Mark application status as REJECTED
         clinic.applicationStatus = ClinicApplicationStatus.REJECTED
         clinic.rejectionReason = "Clinic decommissioned and permanently removed by platform administrator."
         clinicRepository.save(clinic)
 
-        // 3. Cancel upcoming appointments using existing fields ONLY
+        // 3. Cancel upcoming appointments
         val now = Instant.now()
         val upcomingAppointments = appointmentRepository
             .findAllByClinic_IdAndAppointmentDateGreaterThanEqualOrderByAppointmentDateAsc(clinicUserId, now)
@@ -292,6 +290,7 @@ class SuperAdminService(
             clinicId
         )
     }
+
     private fun getClinicsInternal(
         search: String?,
         city: City?,
@@ -341,7 +340,6 @@ class SuperAdminService(
     private fun topClinicsByCommission(): List<TopClinicCommissionResponse> {
         val clinics = clinicRepository.findAll()
         val result = clinics.map { clinic ->
-            val clinicUserId = clinic.user?.id ?: return@map null
             val commission = appointmentRepository.findAllByClinicIdAndAppointmentDateBetween(
                 clinic.id!!,
                 Instant.EPOCH,
@@ -362,7 +360,7 @@ class SuperAdminService(
                 city = clinic.user?.city ?: City.AMMAN,
                 rating = clinic.rating
             )
-        }.filterNotNull()
+        }
 
         return result.sortedByDescending { it.commission }.take(10)
     }

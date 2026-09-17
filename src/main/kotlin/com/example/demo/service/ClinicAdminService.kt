@@ -427,41 +427,50 @@ class ClinicAdminService(
 
         val now = Instant.now()
 
-        // 1. جلب كافة مواعيد هذا الطبيب بالعيادة وفك ارتباطها بجدول المواعيد وبالطبيب
+        // 1. جلب كافة مواعيد هذا الطبيب داخل هذه العيادة.
+        //
+        // مهم: لا نحذف الطبيب من الـ Appointment.
+        // Appointment.doctor معرف في الـ Entity كـ nullable = false،
+        // كما أن المحافظة على الطبيب في السجل التاريخي مطلوبة للتقارير
+        // والتقييمات والتاريخ الطبي.
         val allDoctorAppointments = appointmentRepository
             .findAllByClinic_IdAndDoctor_Id(clinicUserId, doctorUserId)
 
         allDoctorAppointments.forEach { appointment ->
             val appDate = appointment.appointmentDate
 
-            // إلغاء المواعيد القادمة النشطة وتثبيت السبب للمريض
+            // إلغاء المواعيد القادمة النشطة وتثبيت السبب للمريض.
             if (appDate != null && appDate >= now &&
-                (appointment.status == AppointmentStatus.PENDING || appointment.status == AppointmentStatus.CONFIRMED)
+                (appointment.status == AppointmentStatus.PENDING ||
+                        appointment.status == AppointmentStatus.CONFIRMED)
             ) {
                 appointment.status = AppointmentStatus.CANCELLED
                 appointment.bookingKey = null
-                appointment.cancellationReason = "تم إلغاء الموعد لأن الطبيب لم يعد موجوداً في هذه العيادة"
+                appointment.cancellationReason =
+                    "تم إلغاء الموعد لأن الطبيب لم يعد موجوداً في هذه العيادة"
             }
 
-            // فك ارتباط الموعد بالجدول والطبيب لتسليك الحذف في قاعدة البيانات
+            // Schedule يمكن أن يكون NULL، لذلك نفصل الموعد عن الـSchedule
+            // قبل حذف جداول الطبيب الخاصة بهذه العيادة.
             appointment.schedule = null
-            appointment.doctor = null
+
+            // DO NOT do: appointment.doctor = null
+            // doctor_user_id is NOT NULL in the database.
         }
 
-        appointmentRepository.saveAllAndFlush(allDoctorAppointments)
-
-        // 2. فك ارتباط التقييمات إن وجدت
-        val reviews = reviewRepository.findAllByClinicIdOrderByCreatedAtDesc(clinicId)
-            .filter { it.doctor?.id == doctorUserId }
-        if (reviews.isNotEmpty()) {
-            reviews.forEach { it.doctor = null }
-            reviewRepository.saveAllAndFlush(reviews)
+        if (allDoctorAppointments.isNotEmpty()) {
+            appointmentRepository.saveAllAndFlush(allDoctorAppointments)
         }
 
-        // 3. حذف جدول وشفتات عمل الطبيب بالعيادة
+        // 2. لا نفصل الـ Review عن الطبيب.
+        // Review.doctor أيضاً nullable = false، والتقييم التاريخي يجب
+        // أن يبقى مرتبطاً بالطبيب حتى بعد إزالة الطبيب من هذه العيادة.
+
+        // 3. حذف جداول وشفتات الطبيب التابعة لهذه العيادة فقط.
         scheduleRepository.deleteByClinicIdAndDoctor_Id(clinicId, doctorUserId)
 
-        // 4. إزالة الطبيب من قائمة أطباء العيادة
+        // 4. إزالة علاقة الطبيب بهذه العيادة فقط.
+        // لا نحذف User الخاص بالطبيب، لأنه قد يكون مرتبطاً بعيادة أخرى.
         clinicDoctorRepository.deleteById(clinicDoctorId)
     }
 
