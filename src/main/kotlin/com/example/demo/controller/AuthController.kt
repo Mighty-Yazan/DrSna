@@ -1,3 +1,4 @@
+
 package com.example.demo.controller
 
 import com.example.demo.dto.*
@@ -33,24 +34,21 @@ class AuthController(
     @PostMapping("/login")
     fun login(@Valid @RequestBody request: LoginRequest): ResponseEntity<LoginResponse> {
         val (loginResponse, refreshToken) = authService.login(request)
-        
-        val cookie = ResponseCookie.from("refreshToken", refreshToken)
-            .httpOnly(true)
-            .secure(false) // Set to true in production
-            .path("/api/auth")
-            .maxAge(7 * 24 * 60 * 60)
-            .sameSite("Strict")
-            .build()
-            
+
         return ResponseEntity.ok()
-            .header(HttpHeaders.SET_COOKIE, cookie.toString())
+            .header(HttpHeaders.SET_COOKIE, refreshCookie(refreshToken, REFRESH_COOKIE_MAX_AGE).toString())
             .body(loginResponse)
     }
 
     @PostMapping("/refresh")
-    fun refresh(@CookieValue(name = "refreshToken", required = true) refreshToken: String): ResponseEntity<LoginResponse> {
-        val response = authService.refresh(refreshToken)
-        return ResponseEntity.ok(response)
+    fun refresh(
+        @CookieValue(name = "refreshToken", required = false) refreshToken: String?
+    ): ResponseEntity<LoginResponse> {
+        val (loginResponse, newRefreshToken) = authService.refresh(refreshToken)
+
+        return ResponseEntity.ok()
+            .header(HttpHeaders.SET_COOKIE, refreshCookie(newRefreshToken, REFRESH_COOKIE_MAX_AGE).toString())
+            .body(loginResponse)
     }
 
     // Protected: Requires a valid Bearer Token
@@ -84,17 +82,9 @@ class AuthController(
         if (jti != null && expiresAt != null) {
             authService.logout(jti, expiresAt.epochSecond, refreshToken)
         }
-        
-        val clearCookie = ResponseCookie.from("refreshToken", "")
-            .httpOnly(true)
-            .secure(false) // Set to true in production
-            .path("/api/auth")
-            .maxAge(0)
-            .sameSite("Strict")
-            .build()
-            
+
         return ResponseEntity.ok()
-            .header(HttpHeaders.SET_COOKIE, clearCookie.toString())
+            .header(HttpHeaders.SET_COOKIE, refreshCookie("", 0).toString())
             .body(MessageResponse("Logged out successfully"))
     }
 
@@ -106,6 +96,7 @@ class AuthController(
         val response = authService.registerAdmin(request)
         return ResponseEntity.status(HttpStatus.CREATED).body(response)
     }
+
     @PutMapping("/change-password")
     @PreAuthorize("hasRole('ADMIN')")
     fun changePassword(
@@ -117,4 +108,23 @@ class AuthController(
         return ResponseEntity.ok(response)
     }
 
+    private companion object {
+        const val REFRESH_COOKIE_MAX_AGE = 7L * 24 * 60 * 60 // 7 days in seconds
+    }
+    /**
+     * Single source of truth for the refresh-token cookie.
+     * Login, refresh and logout MUST use identical Path (and other attributes):
+     * the browser identifies a cookie by name + domain + path, so a mismatch
+     * leaves two "refreshToken" cookies behind and the stale one gets sent.
+     */
+    private fun refreshCookie(value: String, maxAgeSeconds: Long): ResponseCookie =
+        ResponseCookie.from("refreshToken", value)
+            .httpOnly(true)
+            .secure(false) // Set to true in production over HTTPS
+            .path("/api/auth")
+            .maxAge(maxAgeSeconds)
+            .sameSite("Strict")
+            .build()
+
 }
+ 

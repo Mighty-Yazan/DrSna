@@ -24,10 +24,10 @@ class TokenService(
         val claims = JwtClaimsSet.builder()
             .issuer("self")
             .issuedAt(now)
-            .expiresAt(now.plus(60, ChronoUnit.MINUTES)) // 60 mins
+            .expiresAt(now.plus(60, ChronoUnit.MINUTES))
             .subject(user.email)
-            .id(UUID.randomUUID().toString())                // JTI for blacklist support
-            .claim("userId", user.id.toString())             // UUID as string
+            .id(UUID.randomUUID().toString()) // JTI
+            .claim("userId", user.id.toString())
             .claim("roles", listOf("ROLE_${user.role.name}"))
             .build()
 
@@ -35,8 +35,13 @@ class TokenService(
         return encoder.encode(parameters).tokenValue
     }
 
+
+    // Generates a new refresh token. Cleans up existing tokens for this user to prevent accumulation.
+
     @Transactional
     fun generateRefreshToken(user: User): String {
+        refreshTokenRepository.deleteByUser(user)//if there is already one
+
         val token = UUID.randomUUID().toString()
         val refreshToken = RefreshToken(
             token = token,
@@ -47,20 +52,38 @@ class TokenService(
         return token
     }
 
-    @Transactional(readOnly = true)
-    fun validateRefreshToken(token: String): RefreshToken? {
-        val refreshToken = refreshTokenRepository.findByToken(token) ?: return null
-        if (refreshToken.isExpired()) {
+
+    //when hitting refresh Validates the old token, deletes it, and generates a new one.
+    @Transactional
+    fun rotateRefreshToken(oldTokenString: String): Pair<String, RefreshToken>? {
+        val oldToken = refreshTokenRepository.findByToken(oldTokenString) ?: return null
+
+        if (oldToken.isExpired()) {
+            refreshTokenRepository.delete(oldToken)
             return null
         }
-        return refreshToken
+
+        val user = oldToken.user
+        // Delete the consumed token (RTR single-use principle)
+        refreshTokenRepository.delete(oldToken)
+
+        //  brand new refresh token
+        val newTokenString = UUID.randomUUID().toString()
+        val newRefreshToken = RefreshToken(
+            token = newTokenString,
+            user = user,
+            expiryDate = Instant.now().plus(7, ChronoUnit.DAYS)
+        )
+        val savedToken = refreshTokenRepository.save(newRefreshToken)
+
+        return Pair(newTokenString, savedToken)
     }
-    
+
+
     @Transactional
-    fun deleteByToken(token: String) {
+    fun deleteByToken(token: String) {//on logout
         refreshTokenRepository.findByToken(token)?.let {
             refreshTokenRepository.delete(it)
         }
     }
 }
-

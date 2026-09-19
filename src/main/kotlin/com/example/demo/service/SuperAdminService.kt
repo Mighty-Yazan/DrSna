@@ -265,10 +265,11 @@ class SuperAdminService(
         clinic.rejectionReason = "Clinic decommissioned and permanently removed by platform administrator."
         clinicRepository.save(clinic)
 
-        // 3. Cancel upcoming appointments
+        // 3. Find and handle appointments safely using clinic.id or clinicUserId
         val now = Instant.now()
+        // Ensure we fetch appointments correctly linked to this clinic's user ID
         val upcomingAppointments = appointmentRepository
-            .findAllByClinic_IdAndAppointmentDateGreaterThanEqualOrderByAppointmentDateAsc(clinicUserId, now)
+            .findAllByClinicIdAndAppointmentDateBetween(clinicUserId, now, Instant.parse("2999-12-31T23:59:59Z"))
             .filter { it.status == AppointmentStatus.PENDING || it.status == AppointmentStatus.CONFIRMED }
 
         upcomingAppointments.forEach { appointment ->
@@ -277,8 +278,10 @@ class SuperAdminService(
         }
         appointmentRepository.saveAll(upcomingAppointments)
 
-        // 4. Delete operating hours and shifts for this clinic
+        // 4. Clean up schedules, insurance, and clinic-specialty mappings safely
         scheduleRepository.deleteAllByClinicId(clinic.id!!)
+        insuranceCompanyRepository.deleteAllByClinicId(clinic.id!!)
+        clinicSpecialtyRepository.deleteAllByClinicId(clinic.id!!)
 
         // 5. Disassociate doctors from this clinic
         clinicDoctorRepository.deleteAllByClinic_Id(clinicUserId)
@@ -290,7 +293,6 @@ class SuperAdminService(
             clinicId
         )
     }
-
     private fun getClinicsInternal(
         search: String?,
         city: City?,
