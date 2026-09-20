@@ -36,7 +36,7 @@ class SecurityConfig(
     @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
-            .csrf { it.disable() }
+            .csrf { it.disable() }//Disables Cross-Site Request Forgery protection
             .cors { }
             .sessionManagement {
                 it.sessionCreationPolicy(SessionCreationPolicy.STATELESS)

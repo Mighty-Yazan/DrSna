@@ -15,6 +15,8 @@ import com.example.demo.security.TokenService
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.http.HttpStatus
+import org.springframework.web.server.ResponseStatusException
 
 @Service
 @Transactional
@@ -156,20 +158,26 @@ class AuthService(
         return Pair(loginResponse, refreshToken)
     }
 
-    fun refresh(refreshTokenString: String): LoginResponse {
-        val refreshToken = tokenService.validateRefreshToken(refreshTokenString)
-            ?: throw InvalidCredentialsException("Invalid or expired refresh token")
-        
-        val user = refreshToken.user
-        val token = tokenService.generateAccessToken(user)
+    fun refresh(refreshTokenString: String?): Pair<LoginResponse, String> {
+        if (refreshTokenString.isNullOrBlank()) {
+            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token is missing")
+        }
 
-        return LoginResponse(
-            token = token,
+        val (newRefreshTokenString, newRefreshToken) = tokenService.rotateRefreshToken(refreshTokenString)
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid or expired refresh token")
+
+        val user = newRefreshToken.user
+        val newAccessToken = tokenService.generateAccessToken(user)
+
+        val loginResponse = LoginResponse(
+            token = newAccessToken,
             userId = user.id,
             email = user.email,
             role = user.role,
             isActive = user.isActive
         )
+
+        return Pair(loginResponse, newRefreshTokenString)
     }
 
     fun getProfile(email: String): UserProfileResponse {
