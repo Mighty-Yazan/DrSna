@@ -140,7 +140,7 @@ class AppointmentController(
                 "Authenticated username was not found"
             )
 
-        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(
+        return ResponseEntity.status(HttpStatus.CREATED).body(
             appointmentService.createWalkInAppointment(
                 username,
                 request

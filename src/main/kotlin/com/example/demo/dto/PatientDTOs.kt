@@ -59,14 +59,16 @@ data class ServiceDetailsResponse(
 )
 
 data class DoctorDetailsResponse(
-    val doctorId: UUID,
+    val doctorUserId: UUID,
     val fullName: String,
     val email: String,
     val specialty: String?,
     val bio: String?,
     val isActive: Boolean,
     val schedules: List<ScheduleResponse>
-)
+){
+    val doctorId: UUID get() = doctorUserId // so both naming in front work
+}
 
 data class ScheduleResponse(
     val scheduleId: Any?,

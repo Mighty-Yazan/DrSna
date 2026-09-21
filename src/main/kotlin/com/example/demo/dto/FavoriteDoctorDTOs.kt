@@ -15,4 +15,6 @@ data class FavoriteDoctorResponse(
     val clinicName: String?,
     val specialties: String?,
     val city: City
-)
+){
+    val doctorUserId: UUID get() =doctorId
+}

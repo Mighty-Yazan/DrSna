@@ -202,7 +202,7 @@ class AuthService(
 
         user.fullName = request.fullName.trim()
         user.city = request.city
-
+        user.phoneNumber = request.phoneNumber?.trim()
         if (!passwordEncoder.matches(request.currentPassword, user.password)) {
             throw IllegalArgumentException("Incorrect current password")
         }
