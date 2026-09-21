@@ -4,13 +4,13 @@ enum class City {
     AMMAN,
     IRBID,
     ZARQA,
+    AQABA,
     MAFRAQ,
     AJLOUN,
     JERASH,
     MADABA,
-    BALQA,
     KARAK,
     TAFILEH,
-    MAAN,
-    AQABA
+    BALQA,
+    MAAN
 }

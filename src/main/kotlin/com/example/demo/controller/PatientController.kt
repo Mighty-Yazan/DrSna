@@ -10,7 +10,6 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
-import com.example.demo.repository.ScheduleRepository
 import java.time.LocalDate
 import java.util.UUID
 
@@ -18,26 +17,9 @@ import java.util.UUID
 @RequestMapping("/api/patient")
 @PreAuthorize("hasRole('PATIENT')")
 class PatientController(
-    private val patientService: PatientService,
-    private val scheduleRepository: ScheduleRepository
+    private val patientService: PatientService
 ) {
 
-    @GetMapping("/dump-schedules")
-    fun dumpSchedules(): ResponseEntity<Any> {
-        val schedules = scheduleRepository.findAll().map { s ->
-            mapOf(
-                "id" to s.id,
-                "type" to s.type,
-                "clinicId" to s.clinic?.id,
-                "doctorId" to s.doctor?.id,
-                "dayOfWeek" to s.dayOfWeek,
-                "specificDate" to s.specificDate,
-                "startTime" to s.startTime,
-                "endTime" to s.endTime
-            )
-        }
-        return ResponseEntity.ok(schedules)
-    }
 
     @GetMapping("/clinics")
     fun searchClinics(

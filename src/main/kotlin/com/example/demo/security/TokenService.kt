@@ -55,35 +55,38 @@ class TokenService(
 
     //when hitting refresh Validates the old token, deletes it, and generates a new one.
     @Transactional
-    fun rotateRefreshToken(oldTokenString: String): Pair<String, RefreshToken>? {
-        val oldToken = refreshTokenRepository.findByToken(oldTokenString) ?: return null
+    fun rotateRefreshToken(rawToken: String): Pair<String, RefreshToken>? {
+        // 1. Find by token using pure JPA method (returns RefreshToken?)
+        val existingToken = refreshTokenRepository.findByToken(rawToken) ?: return null
 
-        if (oldToken.isExpired()) {
-            refreshTokenRepository.delete(oldToken)
+        // 2. Access properties directly on the entity
+        if (existingToken.isExpired()) {
+            refreshTokenRepository.delete(existingToken)
             return null
         }
 
-        val user = oldToken.user
-        // Delete the consumed token (RTR single-use principle)
-        refreshTokenRepository.delete(oldToken)
+        val user = existingToken.user
 
-        //  brand new refresh token
+        // 3. Remove old token using Spring JPA's built-in delete
+        refreshTokenRepository.delete(existingToken)
+
+        // 4. Create and save new token using Spring JPA's built-in save
         val newTokenString = UUID.randomUUID().toString()
         val newRefreshToken = RefreshToken(
             token = newTokenString,
             user = user,
             expiryDate = Instant.now().plus(7, ChronoUnit.DAYS)
         )
-        val savedToken = refreshTokenRepository.save(newRefreshToken)
 
+        val savedToken = refreshTokenRepository.save(newRefreshToken)
         return Pair(newTokenString, savedToken)
     }
 
-
     @Transactional
-    fun deleteByToken(token: String) {//on logout
-        refreshTokenRepository.findByToken(token)?.let {
-            refreshTokenRepository.delete(it)
+    fun deleteByToken(token: String) {
+        val existing = refreshTokenRepository.findByToken(token)
+        if (existing != null) {
+            refreshTokenRepository.delete(existing)
         }
     }
 }
