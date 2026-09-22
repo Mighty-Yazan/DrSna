@@ -313,21 +313,4 @@ class AppointmentController(
         )
     }
 
-    // ============================================================
-    // DOHA — PUBLIC APPOINTMENT FORM BOOKING
-    // POST /api/appointments/book
-    // No authentication required — open to all users from the frontend form
-    // ============================================================
-
-    @PostMapping("/api/appointments/book")
-    fun bookAppointment(
-        authentication: Authentication?,
-        @Valid
-        @RequestBody
-        request: BookAppointmentRequest
-    ): ResponseEntity<BookAppointmentResponse> {
-
-        val response = appointmentService.bookAppointment(authentication, request)
-        return ResponseEntity.status(HttpStatus.CREATED).body(response)
-    }
 }

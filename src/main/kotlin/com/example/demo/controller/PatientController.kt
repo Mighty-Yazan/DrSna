@@ -2,6 +2,7 @@ package com.example.demo.controller
 
 import com.example.demo.dto.*
 import com.example.demo.model.City
+import com.example.demo.service.AppointmentService
 import com.example.demo.service.PatientService
 import jakarta.validation.Valid
 import org.springframework.format.annotation.DateTimeFormat
@@ -17,7 +18,8 @@ import java.util.UUID
 @RequestMapping("/api/patient")
 @PreAuthorize("hasRole('PATIENT')")
 class PatientController(
-    private val patientService: PatientService
+    private val patientService: PatientService,
+    private val appointmentService: AppointmentService
 ) {
 
 
@@ -52,12 +54,13 @@ class PatientController(
         ResponseEntity.status(HttpStatus.CREATED).body(patientService.createReview(authentication.name, request))
 
     @PostMapping("/appointments")
-    fun createAppointment(
+    fun bookAppointment(
         authentication: Authentication,
-        @Valid @RequestBody request: CreateAppointmentRequest
-    ): ResponseEntity<AppointmentResponse> =
-        ResponseEntity.status(HttpStatus.CREATED)
-            .body(patientService.createAppointment(authentication.name, request))
+        @Valid @RequestBody request: BookAppointmentRequest
+    ): ResponseEntity<BookAppointmentResponse> {
+        val response = appointmentService.bookAppointment(authentication.name, request)
+        return ResponseEntity.status(HttpStatus.CREATED).body(response)
+    }
 
     @GetMapping("/favorites")
     fun getFavoriteDoctors(authentication: Authentication): ResponseEntity<List<FavoriteDoctorResponse>> =

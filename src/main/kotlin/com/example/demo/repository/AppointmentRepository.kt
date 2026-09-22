@@ -9,13 +9,6 @@ import java.util.UUID
 @Repository
 interface AppointmentRepository : JpaRepository<Appointment, UUID> {
 
-    fun existsByBookingKey(bookingKey: String): Boolean
-
-    fun existsByBookingKeyAndIdNot(
-        bookingKey: String,
-        id: UUID
-    ): Boolean
-
     fun findAllByDoctorIdAndAppointmentDateBetween(
         doctorId: UUID,
         from: Instant,

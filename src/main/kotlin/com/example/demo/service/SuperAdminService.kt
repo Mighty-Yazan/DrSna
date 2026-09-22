@@ -274,7 +274,6 @@ class SuperAdminService(
 
         upcomingAppointments.forEach { appointment ->
             appointment.status = AppointmentStatus.CANCELLED
-            appointment.bookingKey = null
         }
         appointmentRepository.saveAll(upcomingAppointments)
 

@@ -89,14 +89,6 @@ data class AvailabilitySlotResponse(
 )
 
 // -------------------- Appointment booking --------------------
-data class CreateAppointmentRequest(
-    @field:NotNull(message = "Clinic ID is required") val clinicId: UUID?,
-    @field:NotNull(message = "Doctor ID is required") val doctorId: UUID?,
-    @field:NotNull(message = "Service IDs are required") val serviceIds: List<UUID>,
-    @field:NotNull(message = "Schedule ID is required") val scheduleId: Any?,
-    @field:NotNull(message = "Appointment date is required") val appointmentDate: LocalDate?,
-    @field:NotNull(message = "Appointment time is required") val appointmentTime: LocalTime?
-)
 
 data class AppointmentResponse(
     val appointmentId: Any,
