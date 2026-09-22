@@ -91,10 +91,10 @@ class AppointmentService(
 
         val clinicUser = clinic.user ?: throw AppException("Clinic has no associated user account")
 
-        // 4. Doctor validation
-        val doctor = userRepository.findById(request.doctorId)
-            .orElseThrow { ResourceNotFoundException("Doctor not found with ID: ${request.doctorId}") }
 
+        // 4. Doctor validation (Acquires pessimistic write lock on the doctor)
+        val doctor = userRepository.findFirstById(request.doctorId)
+            ?: throw ResourceNotFoundException("Doctor not found with ID: ${request.doctorId}")
         if (doctor.role != Role.DOCTOR) {
             throw AppException("Selected user is not a doctor")
         }
@@ -759,6 +759,12 @@ class AppointmentService(
                 ?: throw AppException(
                     "Appointment time is required"
                 )
+
+        val doctorId = appointment.doctor!!.id!!
+
+        // Lock doctor row before recalculating slots and overlap
+        userRepository.findFirstById(doctorId)
+            ?: throw ResourceNotFoundException("Doctor not found")
 
         validateAppointmentSlot(
             appointment,
