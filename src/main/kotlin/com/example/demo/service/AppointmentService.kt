@@ -14,6 +14,7 @@ import com.example.demo.model.Appointment
 import com.example.demo.model.AppointmentStatus
 import com.example.demo.model.Clinic
 import com.example.demo.model.ClinicApplicationStatus
+import com.example.demo.model.Role
 import com.example.demo.model.Schedule
 import com.example.demo.model.ScheduleType
 import com.example.demo.repository.AppointmentRepository
@@ -50,45 +51,73 @@ class AppointmentService(
     // ============================================================
 
     @Transactional
-    fun bookAppointment(authentication: org.springframework.security.core.Authentication?, request: BookAppointmentRequest): BookAppointmentResponse {
-        if (request.patientAge < 6) {
-            throw AppException("Appointments cannot be booked for patients under 6 years old")
+    fun bookAppointment(patientEmail: String, request: BookAppointmentRequest): BookAppointmentResponse {
+        // 1. Basic validation
+        val serviceIdsReq = request.serviceIds.distinct()
+        if (serviceIdsReq.isEmpty()) {
+            throw AppException("At least one Service ID is required")
         }
 
         val date = request.appointmentAt.toLocalDate()
         val time = request.appointmentAt.toLocalTime()
+
+        if (time.minute % 15 != 0 || time.second != 0 || time.nano != 0) {
+            throw AppException("Appointments must start on a 15-minute slot")
+        }
 
         val appointmentInstant = request.appointmentAt
             .atZone(zoneId)
             .toInstant()
 
         if (!appointmentInstant.isAfter(Instant.now())) {
-            throw AppException("Appointment date and time must be in the future")
+            throw AppException("Appointment time must be in the future")
         }
 
-        val clinicEntity = clinicRepository.findById(request.clinicId)
-            .orElseThrow { ResourceNotFoundException("Clinic with ID '${request.clinicId}' was not found") }
+        // 2. Patient check (patient_user_id is NOT NULL in database)
+        val patient = userRepository.findByEmail(patientEmail)
+            .orElseThrow { ResourceNotFoundException("Patient not found") }
 
-        requireOperationalClinic(clinicEntity)
+        if (patient.role != Role.PATIENT) {
+            throw AppException("Only patients can create appointments")
+        }
 
-        val clinicUser = clinicEntity.user!!
+        // 3. Clinic validation
+        val clinic = clinicRepository.findById(request.clinicId)
+            .orElseThrow { ResourceNotFoundException("Clinic not found with ID: ${request.clinicId}") }
 
-        val doctorUser = userRepository.findById(request.doctorId)
-            .orElseThrow { ResourceNotFoundException("Doctor with ID '${request.doctorId}' was not found") }
+        if (clinic.applicationStatus != ClinicApplicationStatus.APPROVED) {
+            throw AppException("Appointments can only be booked with approved clinics")
+        }
 
-        requireDoctorAssociation(clinicEntity.user!!.id!!, doctorUser.id!!)
+        val clinicUser = clinic.user ?: throw AppException("Clinic has no associated user account")
 
-        val serviceIds = request.serviceIds.distinct()
-        val specialtiesList = specialtyRepository.findAllById(serviceIds)
-        if (specialtiesList.size != serviceIds.size) {
+
+        // 4. Doctor validation (Acquires pessimistic write lock on the doctor)
+        val doctor = userRepository.findFirstById(request.doctorId)
+            ?: throw ResourceNotFoundException("Doctor not found with ID: ${request.doctorId}")
+        if (doctor.role != Role.DOCTOR) {
+            throw AppException("Selected user is not a doctor")
+        }
+
+        if (!doctor.isActive) {
+            throw AppException("Doctor account is inactive and cannot receive bookings")
+        }
+
+        if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinicUser.id!!, doctor.id!!)) {
+            throw AppException("Doctor is not associated with the selected clinic")
+        }
+
+        // 5. Services and Duration validation
+        val specialtiesList = specialtyRepository.findAllById(serviceIdsReq)
+        if (specialtiesList.size != serviceIdsReq.size) {
             throw ResourceNotFoundException("One or more selected services were not found")
         }
 
         val clinicServiceRelations = clinicSpecialtyRepository
             .findAllByClinicId(request.clinicId)
-            .filter { it.specialty?.id in serviceIds }
+            .filter { relation -> relation.specialty?.id in serviceIdsReq }
 
-        if (clinicServiceRelations.size != serviceIds.size) {
+        if (clinicServiceRelations.size != serviceIdsReq.size) {
             throw AppException("One or more selected services are not available at this clinic")
         }
 
@@ -97,25 +126,49 @@ class AppointmentService(
             throw AppException("Selected service duration must be greater than zero")
         }
 
-        val patientUser = authentication?.name?.let { email ->
-            userRepository.findByEmail(email).orElse(null)
+        // 6. Schedule, Shift, and Holiday matching
+        val schedules = scheduleRepository.findByClinicId(request.clinicId)
+
+        val isClinicHoliday = scheduleRepository.existsByClinicIdAndSpecificDateAndType(
+            request.clinicId,
+            date,
+            ScheduleType.HOLIDAY
+        )
+
+        val isDoctorHoliday = schedules.any {
+            it.doctor?.id == doctor.id &&
+                    it.type == ScheduleType.HOLIDAY &&
+                    it.specificDate == date
         }
 
-        val bookingKey = buildBookingKey(doctorUser.id!!, appointmentInstant)
-        if (appointmentRepository.existsByBookingKey(bookingKey)) {
-            throw DuplicateResourceException(
-                "The selected appointment slot has already been booked. Please choose another time."
-            )
+        if (isClinicHoliday || isDoctorHoliday) {
+            throw AppException("The clinic or doctor is not available on this date due to a holiday/closure")
         }
 
-        if (time.minute % 15 != 0 || time.second != 0 || time.nano != 0) {
-            throw AppException("Appointments must start on a 15-minute slot")
+        val clinicHours = schedules.firstOrNull {
+            it.type == ScheduleType.CLINIC_HOURS && it.dayOfWeek == date.dayOfWeek
+        } ?: throw AppException("The clinic is closed on this day")
+
+        // Resolves doctor's active schedule for schedule_id NOT NULL constraint
+        val doctorSchedule = schedules.firstOrNull {
+            it.doctor?.id == doctor.id &&
+                    it.type == ScheduleType.DOCTOR_SHIFT &&
+                    (it.specificDate == date || (it.specificDate == null && it.dayOfWeek == date.dayOfWeek))
+        } ?: throw AppException("Doctor is not scheduled on this day")
+
+        val startShift = maxOf(clinicHours.startTime!!, doctorSchedule.startTime!!)
+        val endShift = minOf(clinicHours.endTime!!, doctorSchedule.endTime!!)
+
+        if (!isValidSlot(startShift, endShift, time, totalDurationMinutes)) {
+            throw AppException("Selected time is outside the doctor's available working hours")
         }
 
+        // 7. Check Overlap
         val from = date.atStartOfDay(zoneId).toInstant()
         val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
+
         val existingAppointments = appointmentRepository
-            .findAllByDoctorIdAndAppointmentDateBetween(request.doctorId, from, to)
+            .findAllByDoctorIdAndAppointmentDateBetween(doctor.id!!, from, to)
             .filter { it.status != AppointmentStatus.CANCELLED }
 
         if (hasAppointmentOverlap(existingAppointments, appointmentInstant, totalDurationMinutes)) {
@@ -124,39 +177,42 @@ class AppointmentService(
             )
         }
 
+        // 8. Build and Save Entity
         val appointment = Appointment(
             clinic          = clinicUser,
-            doctor          = doctorUser,
-            patient         = patientUser,
+            doctor          = doctor,
+            patient         = patient,
+            schedule        = doctorSchedule,
             formPatientName = request.patientName,
             formPatientAge  = request.patientAge,
+            paymentMethod   = request.paymentMethod,
             specialties     = specialtiesList.toMutableList(),
             appointmentDate = appointmentInstant,
             durationMinutes = totalDurationMinutes,
-            paymentMethod   = request.paymentMethod,
-            status          = AppointmentStatus.PENDING,
-            bookingKey      = bookingKey
+            status          = AppointmentStatus.PENDING
         )
 
-        val doctorSchedule = this.validateAppointmentSlot(appointment, date, time)
-        appointment.schedule = doctorSchedule
+        val saved = try {
+            appointmentRepository.saveAndFlush(appointment)
+        } catch (_: DataIntegrityViolationException) {
+            throw DuplicateResourceException(
+                "The selected appointment slot is already booked"
+            )
+        }
 
-        val saved = saveSafely(appointment)
-
-        return BookAppointmentResponse(
-            appointmentId  = saved.id!!,
-            message        = "Appointment Created Successfully",
-            patientName    = request.patientName,
-            patientAge     = request.patientAge,
-            serviceNames   = specialtiesList.map { it.name },
-            appointmentAt  = request.appointmentAt
-                .atZone(zoneId)
-                .toOffsetDateTime(),
-            paymentMethod  = request.paymentMethod,
-            status         = saved.status
-        )
+        return saved.toBookResponse(zoneId)
     }
 
+    private fun Appointment.toBookResponse(zoneId: ZoneId) = BookAppointmentResponse(
+        appointmentId = id!!,
+        message = "Appointment Created Successfully",
+        patientName = formPatientName ?: patient!!.fullName,
+        patientAge = formPatientAge ?: 0,
+        serviceNames = specialties.map { it.name },
+        appointmentAt = appointmentDate?.atZone(zoneId)!!.toOffsetDateTime(),
+        paymentMethod = paymentMethod ?: "UNKNOWN",
+        status = status
+    )
     // ============================================================
     // PATIENT
     // ============================================================
@@ -283,7 +339,6 @@ class AppointmentService(
         ensureCancellable(appointment)
 
         appointment.status = AppointmentStatus.CANCELLED
-        appointment.bookingKey = null
 
         appointmentRepository.save(appointment)
 
@@ -514,17 +569,12 @@ class AppointmentService(
             appointmentDate = date.atTime(time).atZone(zoneId).toInstant(),
             durationMinutes = serviceDurationMinutes,
             status = AppointmentStatus.CONFIRMED,
-            bookingKey = null
         )
 
         validateAppointmentSlot(appointment, date, time)
 
         val newInstant = appointment.appointmentDate!!
         val newBookingKey = buildBookingKey(doctorUser.id!!, newInstant)
-
-        if (appointmentRepository.existsByBookingKey(newBookingKey)) {
-            throw DuplicateResourceException("The selected appointment slot is already booked")
-        }
 
         val from = date.atStartOfDay(zoneId).toInstant()
         val to = date.plusDays(1).atStartOfDay(zoneId).toInstant()
@@ -537,8 +587,6 @@ class AppointmentService(
                 "The selected appointment time overlaps with an existing appointment"
             )
         }
-
-        appointment.bookingKey = newBookingKey
 
         return saveSafely(appointment).toSummary()
     }
@@ -660,12 +708,6 @@ class AppointmentService(
             newStatus
         )
 
-        if (
-            newStatus == AppointmentStatus.CANCELLED
-        ) {
-            appointment.bookingKey = null
-        }
-
         appointment.status = newStatus
 
         return saveSafely(
@@ -718,6 +760,12 @@ class AppointmentService(
                     "Appointment time is required"
                 )
 
+        val doctorId = appointment.doctor!!.id!!
+
+        // Lock doctor row before recalculating slots and overlap
+        userRepository.findFirstById(doctorId)
+            ?: throw ResourceNotFoundException("Doctor not found")
+
         validateAppointmentSlot(
             appointment,
             newDate,
@@ -735,19 +783,6 @@ class AppointmentService(
                 appointment.doctor!!.id!!,
                 newInstant
             )
-
-        if (
-            newBookingKey != appointment.bookingKey &&
-            appointmentRepository
-                .existsByBookingKeyAndIdNot(
-                    newBookingKey,
-                    appointment.id!!
-                )
-        ) {
-            throw DuplicateResourceException(
-                "The selected appointment slot is already booked"
-            )
-        }
 
         val from = newDate.atStartOfDay(zoneId).toInstant()
         val to = newDate.plusDays(1).atStartOfDay(zoneId).toInstant()
@@ -772,7 +807,6 @@ class AppointmentService(
         }
 
         appointment.appointmentDate = newInstant
-        appointment.bookingKey = newBookingKey
 
         return saveSafely(
             appointment

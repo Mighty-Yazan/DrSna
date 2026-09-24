@@ -29,7 +29,7 @@ class Appointment(
     var doctor: User? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "patient_user_id", nullable = true)
+    @JoinColumn(name = "patient_user_id", nullable = false)
     var patient: User? = null,
 
     @ManyToMany(fetch = FetchType.LAZY)
@@ -41,7 +41,7 @@ class Appointment(
     var specialties: MutableList<Specialty> = mutableListOf(),
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "schedule_id")
+    @JoinColumn(name = "schedule_id", nullable = false)
     var schedule: Schedule? = null,
 
     @Column(name = "appointment_date", nullable = false)
@@ -59,20 +59,6 @@ class Appointment(
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     var status: AppointmentStatus = AppointmentStatus.PENDING,
-
-    /*
-     * This value uniquely reserves an active appointment slot.
-     *
-     * Example:
-     * doctorId + appointmentTime
-     *
-     * When an appointment is cancelled, bookingKey becomes null.
-     * PostgreSQL allows multiple NULL values in a UNIQUE column,
-     * therefore the cancelled appointment remains as history while
-     * the same time slot can be booked again.
-     */
-    @Column(name = "booking_key", unique = true, length = 100)
-    var bookingKey: String? = null,
 
     /*
      * Payment method selected by the patient on the booking form.

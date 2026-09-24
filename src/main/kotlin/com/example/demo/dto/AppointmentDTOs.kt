@@ -49,7 +49,6 @@ data class CreateWalkInAppointmentRequest(
  * Fields: Name, Age, Service, Time, Payment Method.
  */
 data class BookAppointmentRequest(
-
     @field:NotNull(message = "Clinic ID is required")
     val clinicId: UUID,
 
@@ -63,7 +62,6 @@ data class BookAppointmentRequest(
     @field:NotNull(message = "Patient age is required")
     @field:Min(value = 6, message = "Patient must be at least 6 years old")
     val patientAge: Int,
-
 
     @field:NotNull(message = "Service IDs are required")
     val serviceIds: List<UUID>,

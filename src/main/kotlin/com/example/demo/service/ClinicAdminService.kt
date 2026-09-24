@@ -429,7 +429,6 @@ class ClinicAdminService(
                 (appointment.status == AppointmentStatus.PENDING || appointment.status == AppointmentStatus.CONFIRMED)
             ) {
                 appointment.status = AppointmentStatus.CANCELLED
-                appointment.bookingKey = null
                 appointment.cancellationReason = "تم إلغاء الموعد لأن الطبيب لم يعد موجوداً في هذه العيادة"
             }
             appointment.schedule = null
