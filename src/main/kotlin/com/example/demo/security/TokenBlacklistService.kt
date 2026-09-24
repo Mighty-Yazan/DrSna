@@ -13,8 +13,9 @@ import java.util.concurrent.ConcurrentHashMap
 @Service
 class TokenBlacklistService {
 
-    private val blacklistedTokens = ConcurrentHashMap<String, Instant>()
 
+    private val blacklistedTokens = ConcurrentHashMap<String, Instant>()
+    private val userRevokedAfter = ConcurrentHashMap<String, Instant>()
     /**
      * Add a token's JTI to the blacklist.
      * @param jti The JWT ID to blacklist
@@ -30,7 +31,16 @@ class TokenBlacklistService {
     fun isBlacklisted(jti: String): Boolean {
         return blacklistedTokens.containsKey(jti)
     }
-
+    /**
+     * Revokes all access tokens issued for a user before this exact instant.
+     */
+    fun revokeAllForUser(userId: String) {
+        userRevokedAfter[userId] = Instant.now()
+    }
+    fun isUserTokenRevoked(userId: String, issuedAt: Instant): Boolean {
+        val revokedTime = userRevokedAfter[userId] ?: return false
+        return issuedAt.isBefore(revokedTime)
+    }
     /**
      * Periodically remove expired entries from the blacklist (every 10 minutes).
      */
@@ -38,5 +48,7 @@ class TokenBlacklistService {
     fun cleanup() {
         val now = Instant.now()
         blacklistedTokens.entries.removeIf { it.value.isBefore(now) }
+        // Clean up user revocation timestamps older than max access token lifespan (60 minutes)
+        userRevokedAfter.entries.removeIf { it.value.isBefore(now.minusSeconds(3600)) }
     }
 }

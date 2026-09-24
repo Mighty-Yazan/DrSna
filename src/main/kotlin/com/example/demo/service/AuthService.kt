@@ -17,7 +17,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.http.HttpStatus
 import org.springframework.web.server.ResponseStatusException
-
+import com.example.demo.repository.RefreshTokenRepository
 @Service
 @Transactional
 class AuthService(
@@ -25,7 +25,8 @@ class AuthService(
     private val clinicRepository: com.example.demo.repository.ClinicRepository,
     private val passwordEncoder: PasswordEncoder,
     private val tokenService: TokenService,
-    private val tokenBlacklistService: TokenBlacklistService
+    private val tokenBlacklistService: TokenBlacklistService,
+    private val refreshTokenRepository: RefreshTokenRepository
 ) {
 
     fun registerUser(request: UserRegisterRequest): AuthResponse {
@@ -167,6 +168,13 @@ class AuthService(
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid or expired refresh token")
 
         val user = newRefreshToken.user
+
+        // Security check: deactivation prevents obtaining new sessions
+        if (!user.isActive && user.role != Role.ADMIN) {
+            refreshTokenRepository.delete(newRefreshToken)
+            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account is inactive")
+        }
+
         val newAccessToken = tokenService.generateAccessToken(user)
 
         val loginResponse = LoginResponse(
@@ -196,7 +204,7 @@ class AuthService(
     }
 
     // Edit Info: Patient / Doctor self-service profile update
-    fun updateProfile(email: String, request: UpdateProfileRequest): UserProfileResponse {
+    fun updateProfile(email: String, request: UpdateProfileRequest): Pair<UserProfileResponse, String?> {
         val user = userRepository.findByEmail(email)
             .orElseThrow { ResourceNotFoundException("User not found with email: $email") }
 
@@ -207,7 +215,8 @@ class AuthService(
             throw IllegalArgumentException("Incorrect current password")
         }
 
-        if (!request.newPassword.isNullOrBlank()) {
+        val passwordChanged = !request.newPassword.isNullOrBlank()
+        if (passwordChanged) {
             if (request.newPassword != request.confirmPassword) {
                 throw PasswordMismatchException()
             }
@@ -215,16 +224,26 @@ class AuthService(
         }
 
         val newEmail = request.email.trim().lowercase()
-
         if (newEmail != user.email && userRepository.existsByEmail(newEmail)) {
             throw IllegalArgumentException("Email is already in use")
         }
-
         user.email = newEmail
 
         val savedUser = userRepository.save(user)
 
-        return UserProfileResponse(
+        var newRefreshToken: String? = null
+
+        // If password was changed:
+        if (passwordChanged) {
+            // 1. Wipe all old sessions for this user across all devices/tabs
+            refreshTokenRepository.deleteByUser(savedUser)
+            tokenBlacklistService.revokeAllForUser(savedUser.id.toString())
+
+            // 2. Give THIS current tab (Chrome) a brand-new valid refresh token
+            newRefreshToken = tokenService.generateRefreshToken(savedUser)
+        }
+
+        val profileResponse = UserProfileResponse(
             userId = savedUser.id,
             fullName = savedUser.fullName,
             email = savedUser.email,
@@ -233,8 +252,9 @@ class AuthService(
             role = savedUser.role,
             clinicLicenseNumber = savedUser.clinicLicenseNumber
         )
-    }
 
+        return Pair(profileResponse, newRefreshToken)
+    }
     fun logout(jti: String, expiresAtEpochSecond: Long, refreshToken: String?) {
         val expiresAt = java.time.Instant.ofEpochSecond(expiresAtEpochSecond)
         tokenBlacklistService.blacklist(jti, expiresAt)
@@ -253,8 +273,12 @@ class AuthService(
             .orElseThrow { ResourceNotFoundException("User not found: $email") }
 
         user.password = passwordEncoder.encode(request.newPassword)!!
-        user.isActive = true // Activate the account after successful password change
-        userRepository.save(user)
+        user.isActive = true
+        val savedUser = userRepository.save(user)
+
+        // Invalidate all past sessions
+        refreshTokenRepository.deleteByUser(savedUser)
+        tokenBlacklistService.revokeAllForUser(savedUser.id.toString())
 
         return MessageResponse("Password changed successfully. Account is now active.")
     }

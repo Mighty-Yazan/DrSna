@@ -66,11 +66,15 @@ class AuthController(
         @AuthenticationPrincipal jwt: Jwt,
         @Valid @RequestBody request: UpdateProfileRequest
     ): ResponseEntity<UserProfileResponse> {
-        val userEmail = jwt.subject
-        val updated = authService.updateProfile(userEmail!!, request)
-        return ResponseEntity.ok(updated)
-    }
+        val userEmail = jwt.subject ?: throw IllegalStateException("Invalid JWT subject")
+        val (profileResponse, newRefreshToken) = authService.updateProfile(userEmail, request)
 
+        val responseBuilder = ResponseEntity.ok()
+        if (newRefreshToken != null) {
+            responseBuilder.header(HttpHeaders.SET_COOKIE, refreshCookie(newRefreshToken, REFRESH_COOKIE_MAX_AGE).toString())
+        }
+        return responseBuilder.body(profileResponse)
+    }
     // Protected: Blacklists the current token's JTI so it cannot be reused
     @PostMapping("/logout")
     fun logout(

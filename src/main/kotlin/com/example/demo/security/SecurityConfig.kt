@@ -90,13 +90,22 @@ class SecurityConfig(
     fun jwtDecoder(): JwtDecoder {
         val baseDecoder = NimbusJwtDecoder.withPublicKey(rsaKeyProperties.publicKey).build()
 
-        // Wrap the decoder to check the blacklist after successful decode
         return JwtDecoder { token ->
             val jwt = baseDecoder.decode(token)
+
+            // 1. Check if individual token was logged out
             val jti = jwt.id
             if (jti != null && tokenBlacklistService.isBlacklisted(jti)) {
                 throw org.springframework.security.oauth2.jwt.JwtException("Token has been revoked")
             }
+
+            // 2. Check if user's sessions were invalidated (password change / deactivation)
+            val userId = jwt.getClaimAsString("userId")
+            val issuedAt = jwt.issuedAt
+            if (userId != null && issuedAt != null && tokenBlacklistService.isUserTokenRevoked(userId, issuedAt)) {
+                throw org.springframework.security.oauth2.jwt.JwtException("Session invalidated due to security update")
+            }
+
             jwt
         }
     }
