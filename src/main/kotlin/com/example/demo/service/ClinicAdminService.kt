@@ -6,6 +6,7 @@ import com.example.demo.exception.DuplicateResourceException
 import com.example.demo.exception.ResourceNotFoundException
 import com.example.demo.model.*
 import com.example.demo.repository.*
+import com.example.demo.security.SessionRevocationService
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -25,7 +26,8 @@ class ClinicAdminService(
     private val reviewRepository: ReviewRepository,
     private val insuranceCompanyRepository: InsuranceCompanyRepository,
     private val scheduleRepository: ScheduleRepository,
-    private val appointmentRepository: AppointmentRepository
+    private val appointmentRepository: AppointmentRepository,
+    private val sessionRevocationService: SessionRevocationService
 ) {
 
     private val zoneIdUtc = ZoneId.of("UTC")
@@ -35,129 +37,336 @@ class ClinicAdminService(
     // =========================================================================
 
     @Transactional(readOnly = true)
-    fun getProfile(userEmail: String): ClinicProfileResponse {
+    fun getProfile(
+        userEmail: String
+    ): ClinicProfileResponse {
         return getClinic(userEmail).toResponse()
     }
 
-    fun updateProfile(userEmail: String, request: ClinicProfileRequest): ClinicProfileResponse {
-        val clinic = getClinic(userEmail)
+    fun updateProfile(
+        userEmail: String,
+        request: ClinicProfileRequest
+    ): ClinicProfileResponse {
 
-        clinic.clinicName = request.clinicName.trim()
-        clinic.phoneNumber = request.phoneNumber?.trim()
-        clinic.detailedAddress = request.detailedAddress?.trim()
-        clinic.socialLinks = request.socialLinks
-            ?.map { it.trim() }
-            ?.filter { it.isNotBlank() }
-            ?.toMutableList()
-            ?: mutableListOf()
-        clinic.workingHours = request.workingHours?.trim()
-        clinic.checkingFee = request.checkingFee
-        clinic.description = request.description?.trim()
+        val clinic =
+            getClinic(userEmail)
+
+        clinic.clinicName =
+            request.clinicName.trim()
+
+        clinic.phoneNumber =
+            request.phoneNumber?.trim()
+
+        clinic.detailedAddress =
+            request.detailedAddress?.trim()
+
+        clinic.socialLinks =
+            request.socialLinks
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                ?.toMutableList()
+                ?: mutableListOf()
+
+        clinic.workingHours =
+            request.workingHours?.trim()
+
+        clinic.checkingFee =
+            request.checkingFee
+
+        clinic.description =
+            request.description?.trim()
 
         clinic.user?.let { user ->
-            user.fullName = request.clinicName.trim()
+
+            user.fullName =
+                request.clinicName.trim()
+
             if (request.city != null) {
-                user.city = request.city
+                user.city =
+                    request.city
             }
+
             userRepository.save(user)
         }
 
-        if (clinic.applicationStatus == ClinicApplicationStatus.REJECTED) {
-            clinic.applicationStatus = ClinicApplicationStatus.PENDING
+        if (
+            clinic.applicationStatus ==
+            ClinicApplicationStatus.REJECTED
+        ) {
+            clinic.applicationStatus =
+                ClinicApplicationStatus.PENDING
+
             clinic.rejectionReason = null
         }
 
-        return clinicRepository.save(clinic).toResponse()
+        return clinicRepository
+            .save(clinic)
+            .toResponse()
     }
 
-    fun resubmitApplication(userEmail: String, request: ResubmitApplicationRequest): ClinicProfileResponse {
-        val clinic = getClinic(userEmail)
-        val user = clinic.user ?: throw IllegalStateException("Clinic is missing linked user")
+    // =========================================================================
+    // 2. RESUBMIT CLINIC APPLICATION
+    // =========================================================================
 
-        if (clinic.applicationStatus != ClinicApplicationStatus.REJECTED) {
-            throw AppException("Only rejected applications can be resubmitted")
+    fun resubmitApplication(
+        userEmail: String,
+        request: ResubmitApplicationRequest
+    ): ClinicProfileResponse {
+
+        val clinic =
+            getClinic(userEmail)
+
+        val user =
+            clinic.user
+                ?: throw IllegalStateException(
+                    "Clinic is missing linked user"
+                )
+
+        if (
+            clinic.applicationStatus !=
+            ClinicApplicationStatus.REJECTED
+        ) {
+            throw AppException(
+                "Only rejected applications can be resubmitted"
+            )
         }
 
-        val newEmail = request.email.trim().lowercase()
-        if (newEmail != user.email.lowercase()) {
-            if (userRepository.existsByEmail(newEmail)) {
-                throw DuplicateResourceException("User with email '${request.email}' already exists")
+        // ---------------------------------------------------------------------
+        // EMAIL
+        // ---------------------------------------------------------------------
+
+        val newEmail =
+            request.email
+                .trim()
+                .lowercase()
+
+        val emailChanged =
+            newEmail != user.email.lowercase()
+
+        if (emailChanged) {
+
+            if (
+                userRepository.existsByEmail(
+                    newEmail
+                )
+            ) {
+                throw DuplicateResourceException(
+                    "User with email '${request.email}' already exists"
+                )
             }
-            user.email = newEmail
+
+            user.email =
+                newEmail
         }
 
-        if (!request.password.isNullOrBlank()) {
-            if (request.password != request.confirmPassword) {
-                throw AppException("Passwords do not match")
+        // ---------------------------------------------------------------------
+        // PASSWORD
+        // ---------------------------------------------------------------------
+
+        val passwordChanged =
+            !request.password.isNullOrBlank()
+
+        if (passwordChanged) {
+
+            if (
+                request.password !=
+                request.confirmPassword
+            ) {
+                throw AppException(
+                    "Passwords do not match"
+                )
             }
-            user.password = passwordEncoder.encode(request.password)
-                ?: throw AppException("Unable to encode password")
+
+            user.password =
+                passwordEncoder.encode(
+                    request.password
+                )
+                    ?: throw AppException(
+                        "Unable to encode password"
+                    )
         }
 
-        user.fullName = request.clinicName.trim()
-        user.city = request.city
-        clinic.clinicName = request.clinicName.trim()
+        /*
+         * Email is part of the JWT subject and password is an
+         * authentication secret.
+         *
+         * Therefore either change invalidates all previous sessions.
+         */
+        if (
+            emailChanged ||
+            passwordChanged
+        ) {
+            sessionRevocationService
+                .revokeAllSessions(user)
+        }
 
-        val newLicenseNumber = request.clinicLicenseNumber.trim()
-        if (newLicenseNumber != user.clinicLicenseNumber) {
-            if (userRepository.existsByClinicLicenseNumber(newLicenseNumber)) {
-                throw DuplicateResourceException("Clinic license number is already registered")
+        // ---------------------------------------------------------------------
+        // CLINIC DATA
+        // ---------------------------------------------------------------------
+
+        user.fullName =
+            request.clinicName.trim()
+
+        user.city =
+            request.city
+
+        clinic.clinicName =
+            request.clinicName.trim()
+
+        // ---------------------------------------------------------------------
+        // LICENSE NUMBER
+        // ---------------------------------------------------------------------
+
+        val newLicenseNumber =
+            request.clinicLicenseNumber.trim()
+
+        if (
+            newLicenseNumber !=
+            user.clinicLicenseNumber
+        ) {
+
+            if (
+                userRepository
+                    .existsByClinicLicenseNumber(
+                        newLicenseNumber
+                    )
+            ) {
+                throw DuplicateResourceException(
+                    "Clinic license number is already registered"
+                )
             }
-            user.clinicLicenseNumber = newLicenseNumber
+
+            user.clinicLicenseNumber =
+                newLicenseNumber
         }
 
-        clinic.applicationStatus = ClinicApplicationStatus.PENDING
-        clinic.rejectionReason = null
+        clinic.applicationStatus =
+            ClinicApplicationStatus.PENDING
+
+        clinic.rejectionReason =
+            null
 
         userRepository.save(user)
-        return clinicRepository.save(clinic).toResponse()
+
+        return clinicRepository
+            .save(clinic)
+            .toResponse()
     }
 
     // =========================================================================
-    // 2. SPECIALTIES & SERVICES
+    // 3. SPECIALTIES & SERVICES
     // =========================================================================
 
     @Transactional(readOnly = true)
-    fun getAllSpecialties(): List<SpecialtyResponse> {// all the specialties likeTeeth Whitening,Root Canal,the specialties themselves
-        return specialtyRepository.findAll().mapNotNull { specialty ->
-            val id = specialty.id ?: return@mapNotNull null
-            SpecialtyResponse(id, specialty.name, 60)
-        }
+    fun getAllSpecialties():
+            List<SpecialtyResponse> {
+
+        return specialtyRepository
+            .findAll()
+            .mapNotNull { specialty ->
+
+                val id =
+                    specialty.id
+                        ?: return@mapNotNull null
+
+                SpecialtyResponse(
+                    id,
+                    specialty.name,
+                    60
+                )
+            }
     }
 
     @Transactional(readOnly = true)
-    fun getSpecialties(userEmail: String): List<SpecialtyResponse> {//the sepcialties choosen by the clinic
-        val clinic = getClinic(userEmail)
-        val clinicId = clinic.id ?: throw IllegalStateException("Clinic missing ID")
+    fun getSpecialties(
+        userEmail: String
+    ): List<SpecialtyResponse> {
 
-        return clinicSpecialtyRepository.findAllByClinicId(clinicId).mapNotNull { relation ->
-            val specialty = relation.specialty ?: return@mapNotNull null
-            val specialtyId = specialty.id ?: return@mapNotNull null
-            SpecialtyResponse(specialtyId, specialty.name, relation.durationMinutes)
-        }
+        val clinic =
+            getClinic(userEmail)
+
+        val clinicId =
+            clinic.id
+                ?: throw IllegalStateException(
+                    "Clinic missing ID"
+                )
+
+        return clinicSpecialtyRepository
+            .findAllByClinicId(clinicId)
+            .mapNotNull { relation ->
+
+                val specialty =
+                    relation.specialty
+                        ?: return@mapNotNull null
+
+                val specialtyId =
+                    specialty.id
+                        ?: return@mapNotNull null
+
+                SpecialtyResponse(
+                    specialtyId,
+                    specialty.name,
+                    relation.durationMinutes
+                )
+            }
     }
 
-    fun addSpecialty(userEmail: String, request: SpecialtyRequest): SpecialtyResponse {
-        val clinic = getClinic(userEmail)
-        val clinicId = clinic.id ?: throw IllegalStateException("Clinic missing ID")
+    fun addSpecialty(
+        userEmail: String,
+        request: SpecialtyRequest
+    ): SpecialtyResponse {
 
-        val name = request.name.trim()
-        val specialty = specialtyRepository.findByNameIgnoreCase(name)
-            ?: specialtyRepository.save(Specialty(name = name))
+        val clinic =
+            getClinic(userEmail)
 
-        val specialtyId = specialty.id ?: throw IllegalStateException("Specialty missing ID")
+        val clinicId =
+            clinic.id
+                ?: throw IllegalStateException(
+                    "Clinic missing ID"
+                )
 
-        if (!clinicSpecialtyRepository.existsByClinicIdAndSpecialtyId(clinicId, specialtyId)) {
+        val name =
+            request.name.trim()
+
+        val specialty =
+            specialtyRepository
+                .findByNameIgnoreCase(name)
+                ?: specialtyRepository.save(
+                    Specialty(name = name)
+                )
+
+        val specialtyId =
+            specialty.id
+                ?: throw IllegalStateException(
+                    "Specialty missing ID"
+                )
+
+        if (
+            !clinicSpecialtyRepository
+                .existsByClinicIdAndSpecialtyId(
+                    clinicId,
+                    specialtyId
+                )
+        ) {
             clinicSpecialtyRepository.save(
                 ClinicSpecialty(
-                    id = ClinicSpecialtyId(clinicId, specialtyId),
+                    id = ClinicSpecialtyId(
+                        clinicId,
+                        specialtyId
+                    ),
                     clinic = clinic,
                     specialty = specialty,
-                    durationMinutes = request.durationMinutes
+                    durationMinutes =
+                        request.durationMinutes
                 )
             )
         }
-        return SpecialtyResponse(specialtyId, specialty.name, request.durationMinutes)
+
+        return SpecialtyResponse(
+            specialtyId,
+            specialty.name,
+            request.durationMinutes
+        )
     }
 
     fun updateSpecialtyDuration(
@@ -165,78 +374,193 @@ class ClinicAdminService(
         specialtyId: UUID,
         request: UpdateSpecialtyDurationRequest
     ): SpecialtyResponse {
-        val clinic = getClinic(userEmail)
-        val clinicId = clinic.id ?: throw IllegalStateException("Clinic missing ID")
 
-        val relation = clinicSpecialtyRepository.findAllByClinicId(clinicId)
-            .firstOrNull { it.specialty?.id == specialtyId }
-            ?: throw ResourceNotFoundException("Service is not associated with this clinic")
+        val clinic =
+            getClinic(userEmail)
 
-        relation.durationMinutes = request.durationMinutes
-        val saved = clinicSpecialtyRepository.save(relation)
-        val specialty = saved.specialty
-            ?: throw ResourceNotFoundException("Service not found")
+        val clinicId =
+            clinic.id
+                ?: throw IllegalStateException(
+                    "Clinic missing ID"
+                )
 
-        val validSpecialtyId = specialty.id ?: throw IllegalStateException("Specialty missing ID")
-        return SpecialtyResponse(validSpecialtyId, specialty.name, saved.durationMinutes)
+        val relation =
+            clinicSpecialtyRepository
+                .findAllByClinicId(clinicId)
+                .firstOrNull {
+                    it.specialty?.id == specialtyId
+                }
+                ?: throw ResourceNotFoundException(
+                    "Service is not associated with this clinic"
+                )
+
+        relation.durationMinutes =
+            request.durationMinutes
+
+        val saved =
+            clinicSpecialtyRepository.save(
+                relation
+            )
+
+        val specialty =
+            saved.specialty
+                ?: throw ResourceNotFoundException(
+                    "Service not found"
+                )
+
+        val validSpecialtyId =
+            specialty.id
+                ?: throw IllegalStateException(
+                    "Specialty missing ID"
+                )
+
+        return SpecialtyResponse(
+            validSpecialtyId,
+            specialty.name,
+            saved.durationMinutes
+        )
     }
 
-    fun removeSpecialty(userEmail: String, name: String) {//uncheck
-        val clinic = getClinic(userEmail)
-        val clinicId = clinic.id ?: throw IllegalStateException("Clinic missing ID")
+    fun removeSpecialty(
+        userEmail: String,
+        name: String
+    ) {
 
-        val specialty = specialtyRepository.findByNameIgnoreCase(name.trim()) ?: return
-        val specialtyId = specialty.id ?: return
+        val clinic =
+            getClinic(userEmail)
 
-        clinicSpecialtyRepository.deleteByClinicIdAndSpecialtyId(clinicId, specialtyId)
+        val clinicId =
+            clinic.id
+                ?: throw IllegalStateException(
+                    "Clinic missing ID"
+                )
+
+        val specialty =
+            specialtyRepository
+                .findByNameIgnoreCase(
+                    name.trim()
+                )
+                ?: return
+
+        val specialtyId =
+            specialty.id
+                ?: return
+
+        clinicSpecialtyRepository
+            .deleteByClinicIdAndSpecialtyId(
+                clinicId,
+                specialtyId
+            )
     }
 
-    fun deleteSpecialtyPermanently(userEmail: String, name: String) {
-        val clinic = getClinic(userEmail)
-        val clinicId = clinic.id ?: throw IllegalStateException("Clinic missing ID")
+    fun deleteSpecialtyPermanently(
+        userEmail: String,
+        name: String
+    ) {
 
-        val specialty = specialtyRepository.findByNameIgnoreCase(name.trim()) ?: return
-        val specialtyId = specialty.id ?: return
+        val clinic =
+            getClinic(userEmail)
 
-        clinicSpecialtyRepository.deleteByClinicIdAndSpecialtyId(clinicId, specialtyId)
-        if (!clinicSpecialtyRepository.existsBySpecialtyId(specialtyId)) {
-            specialtyRepository.delete(specialty)
+        val clinicId =
+            clinic.id
+                ?: throw IllegalStateException(
+                    "Clinic missing ID"
+                )
+
+        val specialty =
+            specialtyRepository
+                .findByNameIgnoreCase(
+                    name.trim()
+                )
+                ?: return
+
+        val specialtyId =
+            specialty.id
+                ?: return
+
+        clinicSpecialtyRepository
+            .deleteByClinicIdAndSpecialtyId(
+                clinicId,
+                specialtyId
+            )
+
+        if (
+            !clinicSpecialtyRepository
+                .existsBySpecialtyId(
+                    specialtyId
+                )
+        ) {
+            specialtyRepository.delete(
+                specialty
+            )
         }
     }
 
     // =========================================================================
-    // 3. INSURANCE COMPANIES
+    // 4. INSURANCE COMPANIES
     // =========================================================================
 
     @Transactional(readOnly = true)
-    fun getInsuranceCompanies(userEmail: String): List<InsuranceCompanyResponse> {
-        val clinic = getClinic(userEmail)
-        val clinicId = clinic.id ?: throw IllegalStateException("Clinic missing ID")
+    fun getInsuranceCompanies(
+        userEmail: String
+    ): List<InsuranceCompanyResponse> {
 
-        return insuranceCompanyRepository.findAllByClinicIdOrderByNameAsc(clinicId)
-            .map { it.toResponse() }
+        val clinic =
+            getClinic(userEmail)
+
+        val clinicId =
+            clinic.id
+                ?: throw IllegalStateException(
+                    "Clinic missing ID"
+                )
+
+        return insuranceCompanyRepository
+            .findAllByClinicIdOrderByNameAsc(
+                clinicId
+            )
+            .map {
+                it.toResponse()
+            }
     }
 
-    fun addInsuranceCompany(userEmail: String, request: InsuranceCompanyRequest): InsuranceCompanyResponse {
-        val clinic = getClinic(userEmail)
+    fun addInsuranceCompany(
+        userEmail: String,
+        request: InsuranceCompanyRequest
+    ): InsuranceCompanyResponse {
 
-        val insuranceCompany = insuranceCompanyRepository.save(
-            InsuranceCompany(
-                clinic = clinic,
-                name = request.name.trim(),
-                coverageTier = request.coverageTier?.trim(),
-                copay = request.copay?.trim(),
-                phone = request.phone?.trim(),
-                portalUrl = request.portalUrl?.trim(),
-                instantPreApproval = request.instantPreApproval,
-                network = request.network?.trim(),
-                code = request.code?.trim(),
-                badgeBg = request.badgeBg?.trim(),
-                badgeText = request.badgeText?.trim(),
-                directBillingType = request.directBillingType?.trim(),
-                status = request.status?.trim()
+        val clinic =
+            getClinic(userEmail)
+
+        val insuranceCompany =
+            insuranceCompanyRepository.save(
+                InsuranceCompany(
+                    clinic = clinic,
+                    name = request.name.trim(),
+                    coverageTier =
+                        request.coverageTier?.trim(),
+                    copay =
+                        request.copay?.trim(),
+                    phone =
+                        request.phone?.trim(),
+                    portalUrl =
+                        request.portalUrl?.trim(),
+                    instantPreApproval =
+                        request.instantPreApproval,
+                    network =
+                        request.network?.trim(),
+                    code =
+                        request.code?.trim(),
+                    badgeBg =
+                        request.badgeBg?.trim(),
+                    badgeText =
+                        request.badgeText?.trim(),
+                    directBillingType =
+                        request.directBillingType?.trim(),
+                    status =
+                        request.status?.trim()
+                )
             )
-        )
+
         return insuranceCompany.toResponse()
     }
 
@@ -245,287 +569,751 @@ class ClinicAdminService(
         insuranceId: UUID,
         request: InsuranceCompanyRequest
     ): InsuranceCompanyResponse {
-        val clinic = getClinic(userEmail)
-        val insuranceCompany = insuranceCompanyRepository.findById(insuranceId)
-            .orElseThrow { ResourceNotFoundException("Insurance company not found with ID: $insuranceId") }
 
-        if (insuranceCompany.clinic?.id != clinic.id) {
-            throw ResourceNotFoundException("Insurance company not found in your clinic")
+        val clinic =
+            getClinic(userEmail)
+
+        val insuranceCompany =
+            insuranceCompanyRepository
+                .findById(insuranceId)
+                .orElseThrow {
+                    ResourceNotFoundException(
+                        "Insurance company not found with ID: $insuranceId"
+                    )
+                }
+
+        if (
+            insuranceCompany.clinic?.id !=
+            clinic.id
+        ) {
+            throw ResourceNotFoundException(
+                "Insurance company not found in your clinic"
+            )
         }
 
-        insuranceCompany.name = request.name.trim()
-        insuranceCompany.coverageTier = request.coverageTier?.trim()
-        insuranceCompany.copay = request.copay?.trim()
-        insuranceCompany.phone = request.phone?.trim()
-        insuranceCompany.portalUrl = request.portalUrl?.trim()
-        insuranceCompany.instantPreApproval = request.instantPreApproval
-        insuranceCompany.network = request.network?.trim()
-        insuranceCompany.code = request.code?.trim()
-        insuranceCompany.badgeBg = request.badgeBg?.trim()
-        insuranceCompany.badgeText = request.badgeText?.trim()
-        insuranceCompany.directBillingType = request.directBillingType?.trim()
-        insuranceCompany.status = request.status?.trim()
+        insuranceCompany.name =
+            request.name.trim()
 
-        return insuranceCompanyRepository.save(insuranceCompany).toResponse()
+        insuranceCompany.coverageTier =
+            request.coverageTier?.trim()
+
+        insuranceCompany.copay =
+            request.copay?.trim()
+
+        insuranceCompany.phone =
+            request.phone?.trim()
+
+        insuranceCompany.portalUrl =
+            request.portalUrl?.trim()
+
+        insuranceCompany.instantPreApproval =
+            request.instantPreApproval
+
+        insuranceCompany.network =
+            request.network?.trim()
+
+        insuranceCompany.code =
+            request.code?.trim()
+
+        insuranceCompany.badgeBg =
+            request.badgeBg?.trim()
+
+        insuranceCompany.badgeText =
+            request.badgeText?.trim()
+
+        insuranceCompany.directBillingType =
+            request.directBillingType?.trim()
+
+        insuranceCompany.status =
+            request.status?.trim()
+
+        return insuranceCompanyRepository
+            .save(insuranceCompany)
+            .toResponse()
     }
 
-    fun deleteInsuranceCompany(userEmail: String, insuranceId: UUID) {
-        val clinic = getClinic(userEmail)
-        val insuranceCompany = insuranceCompanyRepository.findById(insuranceId)
-            .orElseThrow { ResourceNotFoundException("Insurance company not found with ID: $insuranceId") }
+    fun deleteInsuranceCompany(
+        userEmail: String,
+        insuranceId: UUID
+    ) {
 
-        if (insuranceCompany.clinic?.id != clinic.id) {
-            throw ResourceNotFoundException("Insurance company not found in your clinic")
+        val clinic =
+            getClinic(userEmail)
+
+        val insuranceCompany =
+            insuranceCompanyRepository
+                .findById(insuranceId)
+                .orElseThrow {
+                    ResourceNotFoundException(
+                        "Insurance company not found with ID: $insuranceId"
+                    )
+                }
+
+        if (
+            insuranceCompany.clinic?.id !=
+            clinic.id
+        ) {
+            throw ResourceNotFoundException(
+                "Insurance company not found in your clinic"
+            )
         }
 
-        insuranceCompanyRepository.delete(insuranceCompany)
+        insuranceCompanyRepository.delete(
+            insuranceCompany
+        )
     }
 
     // =========================================================================
-    // 4. REVIEWS
+    // 5. REVIEWS
     // =========================================================================
 
     @Transactional(readOnly = true)
-    fun getReviews(userEmail: String, doctorId: UUID?, rating: Int?): List<ReviewResponse> {
-        val clinic = getClinic(userEmail)
-        val clinicId = clinic.id ?: throw IllegalStateException("Clinic missing ID")
+    fun getReviews(
+        userEmail: String,
+        doctorId: UUID?,
+        rating: Int?
+    ): List<ReviewResponse> {
 
-        if (rating != null && rating !in 1..5) {
-            throw AppException("Rating must be between 1 and 5")
+        val clinic =
+            getClinic(userEmail)
+
+        val clinicId =
+            clinic.id
+                ?: throw IllegalStateException(
+                    "Clinic missing ID"
+                )
+
+        if (
+            rating != null &&
+            rating !in 1..5
+        ) {
+            throw AppException(
+                "Rating must be between 1 and 5"
+            )
         }
 
-        return reviewRepository.findAllByClinicIdOrderByCreatedAtDesc(clinicId).asSequence()
-            .filter { doctorId == null || it.doctor?.id == doctorId }
-            .filter { rating == null || it.rating == rating }
-            .mapNotNull { it.toResponse() }
+        return reviewRepository
+            .findAllByClinicIdOrderByCreatedAtDesc(
+                clinicId
+            )
+            .asSequence()
+            .filter {
+                doctorId == null ||
+                        it.doctor?.id == doctorId
+            }
+            .filter {
+                rating == null ||
+                        it.rating == rating
+            }
+            .mapNotNull {
+                it.toResponse()
+            }
             .toList()
     }
 
-    fun replyToReview(userEmail: String, reviewId: UUID, request: ReviewReplyRequest): ReviewResponse {
-        val clinic = getClinic(userEmail)
-        val review = reviewRepository.findById(reviewId)
-            .orElseThrow { ResourceNotFoundException("Review not found") }
+    fun replyToReview(
+        userEmail: String,
+        reviewId: UUID,
+        request: ReviewReplyRequest
+    ): ReviewResponse {
 
-        if (review.clinic?.id != clinic.id) {
-            throw AppException("You cannot reply to this review")
+        val clinic =
+            getClinic(userEmail)
+
+        val review =
+            reviewRepository
+                .findById(reviewId)
+                .orElseThrow {
+                    ResourceNotFoundException(
+                        "Review not found"
+                    )
+                }
+
+        if (
+            review.clinic?.id !=
+            clinic.id
+        ) {
+            throw AppException(
+                "You cannot reply to this review"
+            )
         }
 
-        review.reply = request.reply.trim()
-        review.replyAt = Instant.now()
-        val saved = reviewRepository.save(review)
-        return saved.toResponse() ?: throw IllegalStateException("Failed to map review response")
+        review.reply =
+            request.reply.trim()
+
+        review.replyAt =
+            Instant.now()
+
+        val saved =
+            reviewRepository.save(review)
+
+        return saved.toResponse()
+            ?: throw IllegalStateException(
+                "Failed to map review response"
+            )
     }
 
     // =========================================================================
-    // 5. DOCTORS MANAGEMENT
+    // 6. DOCTORS MANAGEMENT
     // =========================================================================
 
     @Transactional(readOnly = true)
-    fun getDoctors(clinicEmail: String): List<DoctorResponse> {
-        val clinic = getClinic(clinicEmail)
-        val clinicUserId = clinic.user?.id ?: throw IllegalStateException("Clinic missing linked user")
+    fun getDoctors(
+        clinicEmail: String
+    ): List<DoctorResponse> {
 
-        return clinicDoctorRepository.findAllByClinic_Id(clinicUserId)
-            .mapNotNull { it.doctor?.toDoctorResponse() }
+        val clinic =
+            getClinic(clinicEmail)
+
+        val clinicUserId =
+            clinic.user?.id
+                ?: throw IllegalStateException(
+                    "Clinic missing linked user"
+                )
+
+        return clinicDoctorRepository
+            .findAllByClinic_Id(
+                clinicUserId
+            )
+            .mapNotNull {
+                it.doctor?.toDoctorResponse()
+            }
     }
 
-    fun addDoctor(clinicEmail: String, request: AddDoctorRequest): DoctorResponse {
-        val clinic = getClinic(clinicEmail)
-        val clinicUser = clinic.user ?: throw IllegalStateException("Clinic missing linked user")
-        val clinicUserId = clinicUser.id ?: throw IllegalStateException("Clinic user missing ID")
+    fun addDoctor(
+        clinicEmail: String,
+        request: AddDoctorRequest
+    ): DoctorResponse {
 
-        if (userRepository.existsByEmail(request.email.trim())) {
-            throw DuplicateResourceException("User with email '${request.email}' already exists")
+        val clinic =
+            getClinic(clinicEmail)
+
+        val clinicUser =
+            clinic.user
+                ?: throw IllegalStateException(
+                    "Clinic missing linked user"
+                )
+
+        val clinicUserId =
+            clinicUser.id
+                ?: throw IllegalStateException(
+                    "Clinic user missing ID"
+                )
+
+        val normalizedEmail =
+            request.email.trim().lowercase()
+
+        if (
+            userRepository.existsByEmail(
+                normalizedEmail
+            )
+        ) {
+            throw DuplicateResourceException(
+                "User with email '${request.email}' already exists"
+            )
         }
 
-        val encodedPassword = passwordEncoder.encode(request.password)!!//can never be null
+        val encodedPassword =
+            passwordEncoder.encode(
+                request.password
+            )!!
 
-        val doctorUser = userRepository.save(
-            User(
-                fullName = request.fullName.trim(),
-                city = request.city,
-                email = request.email.trim().lowercase(),
-                password = encodedPassword,
-                role = Role.DOCTOR,
-                isActive = true,
-                bio = request.bio?.trim(),
-                specialty = request.specialty?.trim()
+        val doctorUser =
+            userRepository.save(
+                User(
+                    fullName =
+                        request.fullName.trim(),
+                    city =
+                        request.city,
+                    email =
+                        normalizedEmail,
+                    password =
+                        encodedPassword,
+                    role =
+                        Role.DOCTOR,
+                    isActive =
+                        true,
+                    bio =
+                        request.bio?.trim(),
+                    specialty =
+                        request.specialty?.trim()
+                )
             )
-        )
 
-        val doctorId = doctorUser.id ?: throw IllegalStateException("Created doctor missing ID")
+        val doctorId =
+            doctorUser.id
+                ?: throw IllegalStateException(
+                    "Created doctor missing ID"
+                )
 
-        val clinicDoctor = ClinicDoctor(
-            id = ClinicDoctorId(doctorUserId = doctorId, clinicUserId = clinicUserId),
-            doctor = doctorUser,
-            clinic = clinicUser
+        val clinicDoctor =
+            ClinicDoctor(
+                id =
+                    ClinicDoctorId(
+                        doctorUserId =
+                            doctorId,
+                        clinicUserId =
+                            clinicUserId
+                    ),
+                doctor =
+                    doctorUser,
+                clinic =
+                    clinicUser
+            )
+
+        clinicDoctorRepository.save(
+            clinicDoctor
         )
-        clinicDoctorRepository.save(clinicDoctor)
 
         return doctorUser.toDoctorResponse()
     }
 
-    fun updateDoctor(clinicEmail: String, doctorUserId: UUID, request: UpdateDoctorRequest): DoctorResponse {
-        val clinic = getClinic(clinicEmail)
-        val clinicUserId = clinic.user?.id ?: throw IllegalStateException("Clinic missing linked user")
+    fun updateDoctor(
+        clinicEmail: String,
+        doctorUserId: UUID,
+        request: UpdateDoctorRequest
+    ): DoctorResponse {
 
-        if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinicUserId, doctorUserId)) {
-            throw ResourceNotFoundException("Doctor not found in your clinic catalog")
+        val clinic =
+            getClinic(clinicEmail)
+
+        val clinicUserId =
+            clinic.user?.id
+                ?: throw IllegalStateException(
+                    "Clinic missing linked user"
+                )
+
+        if (
+            !clinicDoctorRepository
+                .existsByClinic_IdAndDoctor_Id(
+                    clinicUserId,
+                    doctorUserId
+                )
+        ) {
+            throw ResourceNotFoundException(
+                "Doctor not found in your clinic catalog"
+            )
         }
 
-        val doctorUser = userRepository.findById(doctorUserId)
-            .orElseThrow { ResourceNotFoundException("Doctor user not found with ID: $doctorUserId") }
+        val doctorUser =
+            userRepository.findFirstById(
+                doctorUserId
+            )
+                ?: throw ResourceNotFoundException(
+                    "Doctor user not found with ID: $doctorUserId"
+                )
 
-        val newEmail = request.email.trim().lowercase()
-        if (newEmail != doctorUser.email.lowercase()) {
-            if (userRepository.existsByEmail(newEmail)) {
-                throw DuplicateResourceException("User with email '${request.email}' already exists")
+        // ---------------------------------------------------------------------
+        // EMAIL CHANGE
+        // ---------------------------------------------------------------------
+
+        val newEmail =
+            request.email.trim().lowercase()
+
+        val emailChanged =
+            newEmail !=
+                    doctorUser.email.lowercase()
+
+        if (emailChanged) {
+
+            if (
+                userRepository.existsByEmail(
+                    newEmail
+                )
+            ) {
+                throw DuplicateResourceException(
+                    "User with email '${request.email}' already exists"
+                )
             }
-            doctorUser.email = newEmail
+
+            doctorUser.email =
+                newEmail
         }
 
-        doctorUser.fullName = request.fullName.trim()
+        // ---------------------------------------------------------------------
+        // NORMAL DOCTOR PROFILE
+        // ---------------------------------------------------------------------
+
+        doctorUser.fullName =
+            request.fullName.trim()
+
         if (request.city != null) {
-            doctorUser.city = request.city
+            doctorUser.city =
+                request.city
         }
-        doctorUser.bio = request.bio?.trim()
-        doctorUser.specialty = request.specialty?.trim()
 
-        return userRepository.save(doctorUser).toDoctorResponse()
+        doctorUser.bio =
+            request.bio?.trim()
+
+        doctorUser.specialty =
+            request.specialty?.trim()
+
+        /*
+         * Email is part of the JWT subject.
+         *
+         * Therefore changing the doctor's email must
+         * invalidate every previously issued session.
+         */
+        if (emailChanged) {
+            sessionRevocationService
+                .revokeAllSessions(
+                    doctorUser
+                )
+        }
+
+        return userRepository
+            .save(doctorUser)
+            .toDoctorResponse()
     }
 
-    fun toggleDoctorStatus(clinicEmail: String, doctorUserId: UUID): DoctorResponse {
-        val clinic = getClinic(clinicEmail)
-        val clinicUserId = clinic.user?.id ?: throw IllegalStateException("Clinic missing linked user")
+    fun toggleDoctorStatus(
+        clinicEmail: String,
+        doctorUserId: UUID
+    ): DoctorResponse {
 
-        if (!clinicDoctorRepository.existsByClinic_IdAndDoctor_Id(clinicUserId, doctorUserId)) {
-            throw ResourceNotFoundException("Doctor not found in your clinic catalog")
+        val clinic =
+            getClinic(clinicEmail)
+
+        val clinicUserId =
+            clinic.user?.id
+                ?: throw IllegalStateException(
+                    "Clinic missing linked user"
+                )
+
+        if (
+            !clinicDoctorRepository
+                .existsByClinic_IdAndDoctor_Id(
+                    clinicUserId,
+                    doctorUserId
+                )
+        ) {
+            throw ResourceNotFoundException(
+                "Doctor not found in your clinic catalog"
+            )
         }
 
-        val doctorUser = userRepository.findById(doctorUserId)
-            .orElseThrow { ResourceNotFoundException("Doctor user not found with ID: $doctorUserId") }
+        val doctorUser =
+            userRepository.findFirstById(
+                doctorUserId
+            )
+                ?: throw ResourceNotFoundException(
+                    "Doctor user not found with ID: $doctorUserId"
+                )
 
-        doctorUser.isActive = !doctorUser.isActive
-        return userRepository.save(doctorUser).toDoctorResponse()
+        doctorUser.isActive =
+            !doctorUser.isActive
+
+        /*
+         * Disabling a doctor is security-sensitive.
+         *
+         * Revoke all old sessions immediately.
+         *
+         * Re-enabling does NOT restore old sessions.
+         * The doctor must create a new session by logging in.
+         */
+        if (!doctorUser.isActive) {
+
+            sessionRevocationService
+                .revokeAllSessions(
+                    doctorUser
+                )
+        }
+
+        return userRepository
+            .save(doctorUser)
+            .toDoctorResponse()
     }
 
-    fun deleteDoctor(clinicEmail: String, doctorUserId: UUID) {
-        val clinic = getClinic(clinicEmail)
-        val clinicUserId = clinic.user?.id ?: throw IllegalStateException("Clinic missing linked user")
-        val clinicId = clinic.id ?: throw IllegalStateException("Clinic missing ID")
+    fun deleteDoctor(
+        clinicEmail: String,
+        doctorUserId: UUID
+    ) {
 
-        val clinicDoctorId = ClinicDoctorId(doctorUserId = doctorUserId, clinicUserId = clinicUserId)
+        val clinic =
+            getClinic(clinicEmail)
 
-        if (!clinicDoctorRepository.existsById(clinicDoctorId)) {
-            throw ResourceNotFoundException("Doctor not found in your clinic catalog")
+        val clinicUserId =
+            clinic.user?.id
+                ?: throw IllegalStateException(
+                    "Clinic missing linked user"
+                )
+
+        val clinicId =
+            clinic.id
+                ?: throw IllegalStateException(
+                    "Clinic missing ID"
+                )
+
+        val clinicDoctorId =
+            ClinicDoctorId(
+                doctorUserId =
+                    doctorUserId,
+                clinicUserId =
+                    clinicUserId
+            )
+
+        if (
+            !clinicDoctorRepository
+                .existsById(
+                    clinicDoctorId
+                )
+        ) {
+            throw ResourceNotFoundException(
+                "Doctor not found in your clinic catalog"
+            )
         }
 
-        val now = Instant.now()
-        val allDoctorAppointments = appointmentRepository.findAllByClinic_IdAndDoctor_Id(clinicUserId, doctorUserId)
+        val now =
+            Instant.now()
+
+        val allDoctorAppointments =
+            appointmentRepository
+                .findAllByClinic_IdAndDoctor_Id(
+                    clinicUserId,
+                    doctorUserId
+                )
 
         allDoctorAppointments.forEach { appointment ->
-            val appDate = appointment.appointmentDate
-            if (appDate != null && appDate >= now &&
-                (appointment.status == AppointmentStatus.PENDING || appointment.status == AppointmentStatus.CONFIRMED)
+
+            val appDate =
+                appointment.appointmentDate
+
+            if (
+                appDate != null &&
+                appDate >= now &&
+                (
+                        appointment.status ==
+                                AppointmentStatus.PENDING ||
+                                appointment.status ==
+                                AppointmentStatus.CONFIRMED
+                        )
             ) {
-                appointment.status = AppointmentStatus.CANCELLED
-                appointment.cancellationReason = "تم إلغاء الموعد لأن الطبيب لم يعد موجوداً في هذه العيادة"
+                appointment.status =
+                    AppointmentStatus.CANCELLED
+
+                appointment.cancellationReason =
+                    "تم إلغاء الموعد لأن الطبيب لم يعد موجوداً في هذه العيادة"
             }
+
+            /*
+             * The schedule relation is clinic-specific.
+             *
+             * Historical appointment data is preserved.
+             */
             appointment.schedule = null
         }
 
-        if (allDoctorAppointments.isNotEmpty()) {
-            appointmentRepository.saveAllAndFlush(allDoctorAppointments)
+        if (
+            allDoctorAppointments.isNotEmpty()
+        ) {
+            appointmentRepository
+                .saveAllAndFlush(
+                    allDoctorAppointments
+                )
         }
 
-        scheduleRepository.deleteByClinicIdAndDoctor_Id(clinicId, doctorUserId)
-        clinicDoctorRepository.deleteById(clinicDoctorId)
+        scheduleRepository
+            .deleteByClinicIdAndDoctor_Id(
+                clinicId,
+                doctorUserId
+            )
+
+        clinicDoctorRepository
+            .deleteById(
+                clinicDoctorId
+            )
     }
 
     // =========================================================================
-    // 6. HELPER FUNCTIONS & MAPPERS
+    // 7. HELPERS / MAPPERS
     // =========================================================================
 
-    private fun getClinic(email: String): Clinic {//unified fetch for clinics
-        return clinicRepository.findByUserEmail(email)
-            .orElseThrow { ResourceNotFoundException("Clinic profile not found for email: $email") }
+    private fun getClinic(
+        email: String
+    ): Clinic {
+
+        return clinicRepository
+            .findByUserEmail(email)
+            .orElseThrow {
+                ResourceNotFoundException(
+                    "Clinic profile not found for email: $email"
+                )
+            }
     }
-//.toresponse to show what the frontend will receive
-    private fun Clinic.toResponse(): ClinicProfileResponse {
-        val clinicId = this.id ?: throw IllegalStateException("Clinic missing ID")
-        val linkedUser = this.user ?: throw IllegalStateException("Clinic missing linked user")
-        val userId = linkedUser.id ?: throw IllegalStateException("Linked user missing ID")
+
+    private fun Clinic.toResponse():
+            ClinicProfileResponse {
+
+        val clinicId =
+            this.id
+                ?: throw IllegalStateException(
+                    "Clinic missing ID"
+                )
+
+        val linkedUser =
+            this.user
+                ?: throw IllegalStateException(
+                    "Clinic missing linked user"
+                )
+
+        val userId =
+            linkedUser.id
+                ?: throw IllegalStateException(
+                    "Linked user missing ID"
+                )
 
         return ClinicProfileResponse(
-            id = clinicId,
-            userId = userId,
-            clinicName = this.clinicName,
-            phoneNumber = this.phoneNumber,
-            socialLinks = this.socialLinks,
-            detailedAddress = this.detailedAddress,
-            workingHours = this.workingHours,
-            checkingFee = this.checkingFee,
-            rating = this.rating,
-            description = this.description,
-            city = linkedUser.city,
-            applicationStatus = this.applicationStatus,
-            rejectionReason = this.rejectionReason
+            id =
+                clinicId,
+            userId =
+                userId,
+            clinicName =
+                this.clinicName,
+            phoneNumber =
+                this.phoneNumber,
+            socialLinks =
+                this.socialLinks,
+            detailedAddress =
+                this.detailedAddress,
+            workingHours =
+                this.workingHours,
+            checkingFee =
+                this.checkingFee,
+            rating =
+                this.rating,
+            description =
+                this.description,
+            city =
+                linkedUser.city,
+            applicationStatus =
+                this.applicationStatus,
+            rejectionReason =
+                this.rejectionReason
         )
     }
 
-    private fun User.toDoctorResponse(): DoctorResponse {
-        val userId = this.id ?: throw IllegalStateException("Doctor user missing ID")
+    private fun User.toDoctorResponse():
+            DoctorResponse {
+
+        val userId =
+            this.id
+                ?: throw IllegalStateException(
+                    "Doctor user missing ID"
+                )
+
         return DoctorResponse(
-            doctorUserId = userId,
-            fullName = this.fullName,
-            email = this.email,
-            city = this.city,
-            role = this.role,
-            isActive = this.isActive,
-            bio = this.bio,
-            specialty = this.specialty
+            doctorUserId =
+                userId,
+            fullName =
+                this.fullName,
+            email =
+                this.email,
+            city =
+                this.city,
+            role =
+                this.role,
+            isActive =
+                this.isActive,
+            bio =
+                this.bio,
+            specialty =
+                this.specialty
         )
     }
 
-    private fun InsuranceCompany.toResponse(): InsuranceCompanyResponse {
-        val insuranceId = this.id ?: throw IllegalStateException("InsuranceCompany missing ID")
+    private fun InsuranceCompany.toResponse():
+            InsuranceCompanyResponse {
+
+        val insuranceId =
+            this.id
+                ?: throw IllegalStateException(
+                    "InsuranceCompany missing ID"
+                )
+
         return InsuranceCompanyResponse(
-            id = insuranceId,
-            name = this.name,
-            coverageTier = this.coverageTier,
-            copay = this.copay,
-            phone = this.phone,
-            portalUrl = this.portalUrl,
-            instantPreApproval = this.instantPreApproval,
-            network = this.network,
-            code = this.code,
-            badgeBg = this.badgeBg,
-            badgeText = this.badgeText,
-            directBillingType = this.directBillingType,
-            status = this.status
+            id =
+                insuranceId,
+            name =
+                this.name,
+            coverageTier =
+                this.coverageTier,
+            copay =
+                this.copay,
+            phone =
+                this.phone,
+            portalUrl =
+                this.portalUrl,
+            instantPreApproval =
+                this.instantPreApproval,
+            network =
+                this.network,
+            code =
+                this.code,
+            badgeBg =
+                this.badgeBg,
+            badgeText =
+                this.badgeText,
+            directBillingType =
+                this.directBillingType,
+            status =
+                this.status
         )
     }
 
-    private fun Review.toResponse(): ReviewResponse? {
-        val reviewId = this.id ?: return null
-        val appointmentId = this.appointment?.id ?: return null
-        val patient = this.patient ?: return null
-        val patientId = patient.id ?: return null
-        val doctor = this.doctor ?: return null
-        val doctorId = doctor.id ?: return null
+    private fun Review.toResponse():
+            ReviewResponse? {
+
+        val reviewId =
+            this.id
+                ?: return null
+
+        val appointmentId =
+            this.appointment?.id
+                ?: return null
+
+        val patient =
+            this.patient
+                ?: return null
+
+        val patientId =
+            patient.id
+                ?: return null
+
+        val doctor =
+            this.doctor
+                ?: return null
+
+        val doctorId =
+            doctor.id
+                ?: return null
 
         return ReviewResponse(
-            reviewId = reviewId,
-            appointmentId = appointmentId,
-            patientId = patientId,
-            patientName = patient.fullName,
-            doctorId = doctorId,
-            doctorName = doctor.fullName,
-            rating = this.rating,
-            comment = this.comment,
-            reply = this.reply,
-            replyAt = this.replyAt?.atZone(zoneIdUtc)?.toOffsetDateTime(),
-            createdAt = this.createdAt.atZone(zoneIdUtc).toOffsetDateTime()
+            reviewId =
+                reviewId,
+            appointmentId =
+                appointmentId,
+            patientId =
+                patientId,
+            patientName =
+                patient.fullName,
+            doctorId =
+                doctorId,
+            doctorName =
+                doctor.fullName,
+            rating =
+                this.rating,
+            comment =
+                this.comment,
+            reply =
+                this.reply,
+            replyAt =
+                this.replyAt
+                    ?.atZone(zoneIdUtc)
+                    ?.toOffsetDateTime(),
+            createdAt =
+                this.createdAt
+                    .atZone(zoneIdUtc)
+                    .toOffsetDateTime()
         )
     }
 }

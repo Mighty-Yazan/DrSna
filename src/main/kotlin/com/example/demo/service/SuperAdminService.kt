@@ -5,6 +5,7 @@ import com.example.demo.exception.AppException
 import com.example.demo.exception.ResourceNotFoundException
 import com.example.demo.model.*
 import com.example.demo.repository.*
+import com.example.demo.security.SessionRevocationService
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
@@ -25,71 +26,141 @@ class SuperAdminService(
     private val insuranceCompanyRepository: InsuranceCompanyRepository,
     private val favoriteDoctorRepository: FavoriteDoctorRepository,
     private val fxRateRepository: FxRateRepository,
-    private val adminActivityRepository: AdminActivityRepository
+    private val adminActivityRepository: AdminActivityRepository,
+    private val sessionRevocationService: SessionRevocationService
 ) {
+
     private val zoneId = ZoneOffset.UTC
 
     @Transactional(readOnly = true)
     fun getDashboard(): DashboardSummaryResponse {
-        val now = Instant.now()
         val currentMonth = YearMonth.now(zoneId)
         val previousMonth = currentMonth.minusMonths(1)
 
         val currentRevenue = commissionRevenue(currentMonth)
         val previousRevenue = commissionRevenue(previousMonth)
-        val change = if (previousRevenue.compareTo(BigDecimal.ZERO) == 0) {
-            if (currentRevenue.compareTo(BigDecimal.ZERO) == 0) BigDecimal.ZERO else BigDecimal.valueOf(100)
-        } else {
-            currentRevenue.subtract(previousRevenue)
-                .divide(previousRevenue, 4, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100))
-                .setScale(2, RoundingMode.HALF_UP)
-        }
 
-        val activeClinicsNewThisMonth = clinicRepository.findAll().count {
-            it.submittedAt().isAfter(monthStart(currentMonth))
-        }.toLong()
+        val change =
+            if (previousRevenue.compareTo(BigDecimal.ZERO) == 0) {
+                if (currentRevenue.compareTo(BigDecimal.ZERO) == 0) {
+                    BigDecimal.ZERO
+                } else {
+                    BigDecimal.valueOf(100)
+                }
+            } else {
+                currentRevenue
+                    .subtract(previousRevenue)
+                    .divide(
+                        previousRevenue,
+                        4,
+                        RoundingMode.HALF_UP
+                    )
+                    .multiply(BigDecimal.valueOf(100))
+                    .setScale(2, RoundingMode.HALF_UP)
+            }
 
-        val currentMonthBookings = appointmentRepository.findAllByAppointmentDateBetween(
-            monthStart(currentMonth), monthStart(currentMonth.plusMonths(1))
-        ).count { it.status != AppointmentStatus.CANCELLED }.toLong()
+        val activeClinicsNewThisMonth =
+            clinicRepository.findAll().count {
+                it.applicationStatus == ClinicApplicationStatus.APPROVED &&
+                        it.user?.isActive == true &&
+                        it.submittedAt().isAfter(monthStart(currentMonth))
+            }.toLong()
 
-        val previousMonthBookings = appointmentRepository.findAllByAppointmentDateBetween(
-            monthStart(previousMonth), monthStart(currentMonth)
-        ).count { it.status != AppointmentStatus.CANCELLED }.toLong()
+        val currentMonthBookings =
+            appointmentRepository.findAllByAppointmentDateBetween(
+                monthStart(currentMonth),
+                monthStart(currentMonth.plusMonths(1))
+            ).count {
+                it.status != AppointmentStatus.CANCELLED
+            }.toLong()
 
-        val bookingsChangePercent = if (previousMonthBookings == 0L) {
-            if (currentMonthBookings == 0L) BigDecimal.ZERO else BigDecimal.valueOf(100)
-        } else {
-            BigDecimal.valueOf(currentMonthBookings - previousMonthBookings)
-                .divide(BigDecimal.valueOf(previousMonthBookings), 4, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100))
-                .setScale(2, RoundingMode.HALF_UP)
-        }
+        val previousMonthBookings =
+            appointmentRepository.findAllByAppointmentDateBetween(
+                monthStart(previousMonth),
+                monthStart(currentMonth)
+            ).count {
+                it.status != AppointmentStatus.CANCELLED
+            }.toLong()
 
-        val pending = getClinicsInternal(null, null, ClinicApplicationStatus.PENDING, true)
-        val sixMonths = (5 downTo 0).map { offset ->
-            val month = currentMonth.minusMonths(offset.toLong())
-            MonthlyCommissionRevenueResponse(month.toString(), commissionRevenue(month))
-        }
+        val bookingsChangePercent =
+            if (previousMonthBookings == 0L) {
+                if (currentMonthBookings == 0L) {
+                    BigDecimal.ZERO
+                } else {
+                    BigDecimal.valueOf(100)
+                }
+            } else {
+                BigDecimal.valueOf(
+                    currentMonthBookings - previousMonthBookings
+                )
+                    .divide(
+                        BigDecimal.valueOf(previousMonthBookings),
+                        4,
+                        RoundingMode.HALF_UP
+                    )
+                    .multiply(BigDecimal.valueOf(100))
+                    .setScale(2, RoundingMode.HALF_UP)
+            }
 
-        val fxRates = fxRateRepository.findAll().map { it.toResponse() }
-        val lastFxUpdate = fxRates.maxOfOrNull { it.updatedAt }
+        val pending =
+            getClinicsInternal(
+                null,
+                null,
+                ClinicApplicationStatus.PENDING,
+                true
+            )
+
+        val sixMonths =
+            (5 downTo 0).map { offset ->
+                val month =
+                    currentMonth.minusMonths(
+                        offset.toLong()
+                    )
+
+                MonthlyCommissionRevenueResponse(
+                    month.toString(),
+                    commissionRevenue(month)
+                )
+            }
+
+        val fxRates =
+            fxRateRepository.findAll().map {
+                it.toResponse()
+            }
+
+        val lastFxUpdate =
+            fxRates.maxOfOrNull {
+                it.updatedAt
+            }
 
         return DashboardSummaryResponse(
             commissionRevenueCurrentMonth = currentRevenue,
             commissionRevenueChangePercent = change,
-            activeClinics = clinicRepository.count(),
-            activeClinicsNewThisMonth = activeClinicsNewThisMonth,
-            pendingApprovals = pending.size.toLong(),
+            activeClinics =
+                clinicRepository.countActiveByApplicationStatus(
+                    ClinicApplicationStatus.APPROVED
+                ),
+            activeClinicsNewThisMonth =
+                activeClinicsNewThisMonth,
+            pendingApprovals =
+                pending.size.toLong(),
             pendingClinics = pending,
-            bookingsThisMonth = currentMonthBookings,
-            bookingsChangePercent = bookingsChangePercent,
-            commissionRevenueLast6Months = sixMonths,
+            bookingsThisMonth =
+                currentMonthBookings,
+            bookingsChangePercent =
+                bookingsChangePercent,
+            commissionRevenueLast6Months =
+                sixMonths,
             fxRates = fxRates,
             fxLastUpdated = lastFxUpdate,
-            recentActivity = adminActivityRepository.findTop20ByOrderByCreatedAtDesc().map { it.toResponse() },
-            topClinicsByCommission = topClinicsByCommission()
+            recentActivity =
+                adminActivityRepository
+                    .findTop20ByOrderByCreatedAtDesc()
+                    .map {
+                        it.toResponse()
+                    },
+            topClinicsByCommission =
+                topClinicsByCommission()
         )
     }
 
@@ -99,288 +170,844 @@ class SuperAdminService(
         city: City?,
         status: ClinicApplicationStatus?,
         active: Boolean?
-    ): List<ClinicAdminListItem> = getClinicsInternal(search, city, status, active)
+    ): List<ClinicAdminListItem> =
+        getClinicsInternal(
+            search,
+            city,
+            status,
+            active
+        )
 
     @Transactional(readOnly = true)
-    fun getClinicCount(): Long = clinicRepository.count()
+    fun getClinicCount(): Long =
+        clinicRepository.count()
 
     @Transactional(readOnly = true)
-    fun getFxRates(): List<FxRateResponse> = fxRateRepository.findAll().map { it.toResponse() }
+    fun getFxRates(): List<FxRateResponse> =
+        fxRateRepository
+            .findAll()
+            .map {
+                it.toResponse()
+            }
 
     @Transactional(readOnly = true)
     fun getRecentActivities(): List<AdminActivityResponse> =
-        adminActivityRepository.findTop20ByOrderByCreatedAtDesc().map { it.toResponse() }
+        adminActivityRepository
+            .findTop20ByOrderByCreatedAtDesc()
+            .map {
+                it.toResponse()
+            }
 
     @Transactional(readOnly = true)
-    fun getTopClinics(): List<TopClinicCommissionResponse> = topClinicsByCommission()
+    fun getTopClinics():
+            List<TopClinicCommissionResponse> =
+        topClinicsByCommission()
 
     @Transactional(readOnly = true)
-    fun getLast6MonthsRevenue(): List<MonthlyCommissionRevenueResponse> {
-        val currentMonth = YearMonth.now(zoneId)
+    fun getLast6MonthsRevenue():
+            List<MonthlyCommissionRevenueResponse> {
+
+        val currentMonth =
+            YearMonth.now(zoneId)
+
         return (5 downTo 0).map { offset ->
-            val month = currentMonth.minusMonths(offset.toLong())
-            MonthlyCommissionRevenueResponse(month.toString(), commissionRevenue(month))
+
+            val month =
+                currentMonth.minusMonths(
+                    offset.toLong()
+                )
+
+            MonthlyCommissionRevenueResponse(
+                month.toString(),
+                commissionRevenue(month)
+            )
         }
     }
 
     @Transactional(readOnly = true)
-    fun getPendingClinics(): List<ClinicAdminListItem> =
-        getClinicsInternal(null, null, ClinicApplicationStatus.PENDING, null)
+    fun getPendingClinics():
+            List<ClinicAdminListItem> =
+        getClinicsInternal(
+            null,
+            null,
+            ClinicApplicationStatus.PENDING,
+            null
+        )
 
     @Transactional(readOnly = true)
-    fun getClinicReview(clinicId: UUID): ClinicApplicationReviewResponse {
-        val clinic = getClinic(clinicId)
-        val clinicUser = clinic.user ?: throw AppException("Clinic is missing its submitting user")
-        val clinicUserId = clinicUser.id ?: throw AppException("Clinic user has no ID")
+    fun getClinicReview(
+        clinicId: UUID
+    ): ClinicApplicationReviewResponse {
 
-        val doctors = clinicDoctorRepository.findAllByClinic_Id(clinicUserId).mapNotNull { relation ->
-            relation.doctor?.let { doctor ->
-                ClinicDoctorReviewItem(
-                    doctorUserId = doctor.id!!,
-                    fullName = doctor.fullName,
-                    email = doctor.email,
-                    specialty = doctor.specialty,
-                    isActive = doctor.isActive
+        val clinic =
+            getClinic(clinicId)
+
+        val clinicUser =
+            clinic.user
+                ?: throw AppException(
+                    "Clinic is missing its submitting user"
                 )
-            }
-        }
 
-        val services = clinicSpecialtyRepository.findAllByClinicId(clinic.id!!).mapNotNull { relation ->
-            val specialty = relation.specialty ?: return@mapNotNull null
-            ClinicServiceReviewItem(
-                specialtyId = specialty.id!!,
-                name = specialty.name,
-                durationMinutes = relation.durationMinutes
-            )
-        }
+        val clinicUserId =
+            clinicUser.id
+                ?: throw AppException(
+                    "Clinic user has no ID"
+                )
+
+        val doctors =
+            clinicDoctorRepository
+                .findAllByClinic_Id(clinicUserId)
+                .mapNotNull { relation ->
+
+                    relation.doctor?.let { doctor ->
+
+                        ClinicDoctorReviewItem(
+                            doctorUserId =
+                                doctor.id!!,
+                            fullName =
+                                doctor.fullName,
+                            email =
+                                doctor.email,
+                            specialty =
+                                doctor.specialty,
+                            isActive =
+                                doctor.isActive
+                        )
+                    }
+                }
+
+        val services =
+            clinicSpecialtyRepository
+                .findAllByClinicId(clinic.id!!)
+                .mapNotNull { relation ->
+
+                    val specialty =
+                        relation.specialty
+                            ?: return@mapNotNull null
+
+                    ClinicServiceReviewItem(
+                        specialtyId =
+                            specialty.id!!,
+                        name =
+                            specialty.name,
+                        durationMinutes =
+                            relation.durationMinutes
+                    )
+                }
 
         return ClinicApplicationReviewResponse(
-            clinicId = clinic.id!!,
-            clinicInformation = ClinicInformationResponse(
-                clinicName = clinic.clinicName,
-                phoneNumber = clinic.phoneNumber,
-                address = clinic.detailedAddress,
-                city = clinicUser.city,
-                workingHours = clinic.workingHours,
-                checkingFee = clinic.checkingFee,
-                rating = clinic.rating,
-                description = clinic.description
-            ),
-            applicationStatus = clinic.applicationStatus,
-            submissionDate = clinic.submittedAt(),
-            submittingUser = SubmittingUserResponse(
-                userId = clinicUser.id!!,
-                fullName = clinicUser.fullName,
-                email = clinicUser.email,
-                city = clinicUser.city,
-                role = clinicUser.role.name,
-                createdAt = clinicUser.createdAt
-            ),
-            brand = clinic.brand,
-            branches = clinic.branchCount,
-            doctors = doctors,
-            services = services,
-            currency = clinic.currency,
-            taxRegistration = clinic.taxRegistration,
-            currentCommissionRate = clinic.commissionRate,
-            overriddenCommissionRate = clinic.overriddenCommissionRate,
-            effectiveCommissionRate = clinic.effectiveCommissionRate(),
-            rejectionReason = clinic.rejectionReason
+            clinicId =
+                clinic.id!!,
+
+            clinicInformation =
+                ClinicInformationResponse(
+                    clinicName =
+                        clinic.clinicName,
+                    phoneNumber =
+                        clinic.phoneNumber,
+                    address =
+                        clinic.detailedAddress,
+                    city =
+                        clinicUser.city,
+                    workingHours =
+                        clinic.workingHours,
+                    checkingFee =
+                        clinic.checkingFee,
+                    rating =
+                        clinic.rating,
+                    description =
+                        clinic.description
+                ),
+
+            applicationStatus =
+                clinic.applicationStatus,
+
+            submissionDate =
+                clinic.submittedAt(),
+
+            submittingUser =
+                SubmittingUserResponse(
+                    userId =
+                        clinicUser.id!!,
+                    fullName =
+                        clinicUser.fullName,
+                    email =
+                        clinicUser.email,
+                    city =
+                        clinicUser.city,
+                    role =
+                        clinicUser.role.name,
+                    createdAt =
+                        clinicUser.createdAt
+                ),
+
+            brand =
+                clinic.brand,
+
+            branches =
+                clinic.branchCount,
+
+            doctors =
+                doctors,
+
+            services =
+                services,
+
+            currency =
+                clinic.currency,
+
+            taxRegistration =
+                clinic.taxRegistration,
+
+            currentCommissionRate =
+                clinic.commissionRate,
+
+            overriddenCommissionRate =
+                clinic.overriddenCommissionRate,
+
+            effectiveCommissionRate =
+                clinic.effectiveCommissionRate(),
+
+            rejectionReason =
+                clinic.rejectionReason
         )
     }
 
-    fun approveClinic(adminEmail: String, clinicId: UUID): ClinicApplicationReviewResponse {
-        val clinic = getClinic(clinicId)
-        if (clinic.applicationStatus != ClinicApplicationStatus.PENDING) {
-            throw AppException("Only PENDING clinic applications can be approved")
+    // =========================================================================
+    // APPROVE CLINIC
+    // =========================================================================
+
+    fun approveClinic(
+        adminEmail: String,
+        clinicId: UUID
+    ): ClinicApplicationReviewResponse {
+
+        val clinic =
+            getClinic(clinicId)
+
+        if (
+            clinic.applicationStatus !=
+            ClinicApplicationStatus.PENDING
+        ) {
+            throw AppException(
+                "Only PENDING clinic applications can be approved"
+            )
         }
-        clinic.applicationStatus = ClinicApplicationStatus.APPROVED
+
+        clinic.applicationStatus =
+            ClinicApplicationStatus.APPROVED
+
         clinic.rejectionReason = null
+
         clinicRepository.save(clinic)
-        logActivity(adminEmail, "APPROVE_CLINIC", "Clinic '${clinic.clinicName}' was approved", clinic.id)
+
+        logActivity(
+            adminEmail,
+            "APPROVE_CLINIC",
+            "Clinic '${clinic.clinicName}' was approved",
+            clinic.id
+        )
+
         return getClinicReview(clinicId)
     }
 
-    fun rejectClinic(adminEmail: String, clinicId: UUID, request: RejectClinicRequest): ClinicApplicationReviewResponse {
-        val reason = request.reason.trim()
-        if (reason.isBlank()) throw AppException("Rejection reason is required")
+    // =========================================================================
+    // REJECT CLINIC
+    // =========================================================================
 
-        val clinic = getClinic(clinicId)
-        if (clinic.applicationStatus != ClinicApplicationStatus.PENDING) {
-            throw AppException("Only PENDING clinic applications can be rejected")
+    fun rejectClinic(
+        adminEmail: String,
+        clinicId: UUID,
+        request: RejectClinicRequest
+    ): ClinicApplicationReviewResponse {
+
+        val reason =
+            request.reason.trim()
+
+        if (reason.isBlank()) {
+            throw AppException(
+                "Rejection reason is required"
+            )
         }
-        clinic.applicationStatus = ClinicApplicationStatus.REJECTED
-        clinic.rejectionReason = reason
+
+        val clinic =
+            getClinic(clinicId)
+
+        if (
+            clinic.applicationStatus !=
+            ClinicApplicationStatus.PENDING
+        ) {
+            throw AppException(
+                "Only PENDING clinic applications can be rejected"
+            )
+        }
+
+        clinic.applicationStatus =
+            ClinicApplicationStatus.REJECTED
+
+        clinic.rejectionReason =
+            reason
+
         clinicRepository.save(clinic)
-        logActivity(adminEmail, "REJECT_CLINIC", "Clinic '${clinic.clinicName}' was rejected: $reason", clinic.id)
+
+        logActivity(
+            adminEmail,
+            "REJECT_CLINIC",
+            "Clinic '${clinic.clinicName}' was rejected: $reason",
+            clinic.id
+        )
+
         return getClinicReview(clinicId)
     }
+
+    // =========================================================================
+    // COMMISSION OVERRIDE
+    // =========================================================================
 
     fun overrideCommission(
         adminEmail: String,
         clinicId: UUID,
         request: CommissionOverrideRequest
     ): ClinicApplicationReviewResponse {
-        val clinic = getClinic(clinicId)
-        if (clinic.applicationStatus != ClinicApplicationStatus.PENDING) {
-            throw AppException("Commission override is available during PENDING review only")
+
+        val clinic =
+            getClinic(clinicId)
+
+        if (
+            clinic.applicationStatus !=
+            ClinicApplicationStatus.PENDING
+        ) {
+            throw AppException(
+                "Commission override is available during PENDING review only"
+            )
         }
-        clinic.overriddenCommissionRate = request.commissionRate.setScale(4, RoundingMode.HALF_UP)
+
+        clinic.overriddenCommissionRate =
+            request.commissionRate.setScale(
+                4,
+                RoundingMode.HALF_UP
+            )
+
         clinicRepository.save(clinic)
+
         logActivity(
             adminEmail,
             "OVERRIDE_COMMISSION",
             "Commission for clinic '${clinic.clinicName}' overridden to ${clinic.overriddenCommissionRate}%",
             clinic.id
         )
+
         return getClinicReview(clinicId)
     }
 
-    fun upsertFxRate(adminEmail: String, request: UpsertFxRateRequest): FxRateResponse {
-        val base = request.baseCurrency.trim().uppercase()
-        val quote = request.quoteCurrency.trim().uppercase()
-        if (base == quote) throw AppException("Base and quote currencies must be different")
+    // =========================================================================
+    // FX RATE
+    // =========================================================================
 
-        val rate = fxRateRepository.findByBaseCurrencyAndQuoteCurrency(base, quote)
-            ?: FxRate(baseCurrency = base, quoteCurrency = quote)
-        rate.rate = request.rate
-        rate.updatedAt = Instant.now()
-        val saved = fxRateRepository.save(rate)
-        logActivity(adminEmail, "UPDATE_FX_RATE", "FX rate updated: $base/$quote = ${request.rate}", null)
+    fun upsertFxRate(
+        adminEmail: String,
+        request: UpsertFxRateRequest
+    ): FxRateResponse {
+
+        val base =
+            request.baseCurrency
+                .trim()
+                .uppercase()
+
+        val quote =
+            request.quoteCurrency
+                .trim()
+                .uppercase()
+
+        if (base == quote) {
+            throw AppException(
+                "Base and quote currencies must be different"
+            )
+        }
+
+        val rate =
+            fxRateRepository
+                .findByBaseCurrencyAndQuoteCurrency(
+                    base,
+                    quote
+                )
+                ?: FxRate(
+                    baseCurrency = base,
+                    quoteCurrency = quote
+                )
+
+        rate.rate =
+            request.rate
+
+        rate.updatedAt =
+            Instant.now()
+
+        val saved =
+            fxRateRepository.save(rate)
+
+        logActivity(
+            adminEmail,
+            "UPDATE_FX_RATE",
+            "FX rate updated: $base/$quote = ${request.rate}",
+            null
+        )
+
         return saved.toResponse()
     }
 
-    @Transactional
-    fun removeClinic(adminEmail: String, clinicId: UUID) {
-        val clinic = getClinic(clinicId)
-        val clinicUser = clinic.user ?: throw AppException("Clinic is missing its user")
-        val clinicUserId = clinicUser.id ?: throw AppException("Clinic user has no ID")
+    // =========================================================================
+    // DEACTIVATE CLINIC
+    // =========================================================================
 
-        // 1. Deactivate login access
-        clinicUser.isActive = false
-        userRepository.save(clinicUser)
+    /**
+     * Deactivates a clinic without physically deleting
+     * the clinic record or historical appointment data.
+     *
+     * Security behavior:
+     *
+     * - Clinic login becomes unavailable.
+     * - securityVersion is incremented.
+     * - All refresh sessions are revoked.
+     * - Existing access tokens become invalid.
+     */
+    fun removeClinic(
+        adminEmail: String,
+        clinicId: UUID
+    ) {
 
-        // 2. Mark application status as REJECTED
-        clinic.applicationStatus = ClinicApplicationStatus.REJECTED
-        clinic.rejectionReason = "Clinic decommissioned and permanently removed by platform administrator."
+        val clinic =
+            getClinic(clinicId)
+
+        val clinicUser =
+            clinic.user
+                ?: throw AppException(
+                    "Clinic is missing its user"
+                )
+
+        val clinicUserId =
+            clinicUser.id
+                ?: throw AppException(
+                    "Clinic user has no ID"
+                )
+
+        /*
+         * Lock the clinic user before making
+         * security-sensitive changes.
+         *
+         * This keeps the same USER -> SESSION
+         * ordering used by token rotation.
+         */
+        val lockedClinicUser =
+            userRepository.findFirstById(
+                clinicUserId
+            )
+                ?: throw ResourceNotFoundException(
+                    "Clinic user not found with ID: $clinicUserId"
+                )
+
+        /*
+         * Disable the clinic account.
+         */
+        lockedClinicUser.isActive =
+            false
+
+        /*
+         * Centralized session revocation:
+         *
+         * securityVersion++
+         * +
+         * delete all refresh sessions
+         *
+         * This invalidates both old Access Tokens
+         * and old Refresh Tokens.
+         */
+        sessionRevocationService
+            .revokeAllSessions(
+                lockedClinicUser
+            )
+
+        /*
+         * Persist the account state before
+         * completing the transaction.
+         */
+        userRepository.saveAndFlush(
+            lockedClinicUser
+        )
+
+        /*
+         * Keep the clinic record for historical data,
+         * but make it operationally unavailable.
+         */
+        clinic.applicationStatus =
+            ClinicApplicationStatus.REJECTED
+
+        clinic.rejectionReason =
+            "Clinic was deactivated and removed by the platform administrator."
+
         clinicRepository.save(clinic)
 
-        // 3. Find and handle appointments safely using clinic.id or clinicUserId
-        val now = Instant.now()
-        // Ensure we fetch appointments correctly linked to this clinic's user ID
-        val upcomingAppointments = appointmentRepository
-            .findAllByClinicIdAndAppointmentDateBetween(clinicUserId, now, Instant.parse("2999-12-31T23:59:59Z"))
-            .filter { it.status == AppointmentStatus.PENDING || it.status == AppointmentStatus.CONFIRMED }
+        /*
+         * Cancel all future PENDING / CONFIRMED
+         * appointments.
+         *
+         * Historical appointments are preserved.
+         */
+        val now =
+            Instant.now()
 
-        upcomingAppointments.forEach { appointment ->
-            appointment.status = AppointmentStatus.CANCELLED
+        val futureAppointments =
+            appointmentRepository
+                .findAllByClinicIdAndAppointmentDateBetween(
+                    clinicUserId,
+                    now,
+                    Instant.parse(
+                        "2999-12-31T23:59:59Z"
+                    )
+                )
+                .filter {
+                    it.status ==
+                            AppointmentStatus.PENDING ||
+                            it.status ==
+                            AppointmentStatus.CONFIRMED
+                }
+
+        futureAppointments.forEach { appointment ->
+
+            appointment.status =
+                AppointmentStatus.CANCELLED
         }
-        appointmentRepository.saveAll(upcomingAppointments)
 
-        // 4. Clean up schedules, insurance, and clinic-specialty mappings safely
-        scheduleRepository.deleteAllByClinicId(clinic.id!!)
-        insuranceCompanyRepository.deleteAllByClinicId(clinic.id!!)
-        clinicSpecialtyRepository.deleteAllByClinicId(clinic.id!!)
+        if (
+            futureAppointments.isNotEmpty()
+        ) {
+            appointmentRepository.saveAll(
+                futureAppointments
+            )
+        }
 
-        // 5. Disassociate doctors from this clinic
-        clinicDoctorRepository.deleteAllByClinic_Id(clinicUserId)
+        /*
+         * Stop future operational usage while
+         * preserving historical data.
+         */
+        scheduleRepository.deleteAllByClinicId(
+            clinic.id!!
+        )
+
+        insuranceCompanyRepository.deleteAllByClinicId(
+            clinic.id!!
+        )
+
+        clinicSpecialtyRepository.deleteAllByClinicId(
+            clinic.id!!
+        )
+
+        /*
+         * Remove the doctor-clinic assignment.
+         *
+         * The doctor User itself is NOT deleted.
+         * Historical appointments continue to reference
+         * the original doctor.
+         */
+        clinicDoctorRepository.deleteAllByClinic_Id(
+            clinicUserId
+        )
 
         logActivity(
             adminEmail,
             "REMOVE_CLINIC",
-            "Clinic '${clinic.clinicName}' was decommissioned; ${upcomingAppointments.size} upcoming appointments cancelled.",
+            "Clinic '${clinic.clinicName}' was deactivated; " +
+                    "${futureAppointments.size} future appointments cancelled.",
             clinicId
         )
     }
+
+    // =========================================================================
+    // INTERNAL CLINIC QUERY
+    // =========================================================================
+
     private fun getClinicsInternal(
         search: String?,
         city: City?,
         status: ClinicApplicationStatus?,
         active: Boolean?
     ): List<ClinicAdminListItem> {
-        return clinicRepository.searchForAdmin(search?.trim()?.takeIf { it.isNotBlank() }, city, status, active)
+
+        return clinicRepository
+            .searchForAdmin(
+                search
+                    ?.trim()
+                    ?.takeIf {
+                        it.isNotBlank()
+                    },
+                city,
+                status,
+                active
+            )
             .map { clinic ->
-                val clinicUserId = clinic.user?.id ?: throw AppException("Clinic missing linked user")
+
+                val clinicUser =
+                    clinic.user
+                        ?: throw AppException(
+                            "Clinic missing linked user"
+                        )
+
+                val clinicUserId =
+                    clinicUser.id
+                        ?: throw AppException(
+                            "Clinic user missing ID"
+                        )
+
                 ClinicAdminListItem(
-                    clinicId = clinic.id!!,
-                    clinicName = clinic.clinicName,
-                    city = clinic.user!!.city,
-                    numberOfBranches = clinic.branchCount,
-                    numberOfDoctors = clinicDoctorRepository.countByClinic_Id(clinicUserId),
-                    currency = clinic.currency,
-                    submittedDate = clinic.submittedAt(),
-                    applicationStatus = clinic.applicationStatus,
-                    isActive = clinic.user!!.isActive,
-                    rejectionReason = clinic.rejectionReason
+                    clinicId =
+                        clinic.id!!,
+
+                    clinicName =
+                        clinic.clinicName,
+
+                    city =
+                        clinicUser.city,
+
+                    numberOfBranches =
+                        clinic.branchCount,
+
+                    numberOfDoctors =
+                        clinicDoctorRepository
+                            .countByClinic_Id(
+                                clinicUserId
+                            ),
+
+                    currency =
+                        clinic.currency,
+
+                    submittedDate =
+                        clinic.submittedAt(),
+
+                    applicationStatus =
+                        clinic.applicationStatus,
+
+                    isActive =
+                        clinicUser.isActive,
+
+                    rejectionReason =
+                        clinic.rejectionReason
                 )
             }
     }
 
-    private fun getClinic(clinicId: UUID): Clinic =
-        clinicRepository.findByIdWithUser(clinicId)
-            .orElseThrow { ResourceNotFoundException("Clinic not found with ID: $clinicId") }
+    // =========================================================================
+    // GET CLINIC
+    // =========================================================================
 
-    private fun commissionRevenue(month: YearMonth): BigDecimal {
-        val appointments = appointmentRepository.findAllByAppointmentDateBetween(
-            monthStart(month),
-            monthStart(month.plusMonths(1))
-        )
-        return appointments
-            .filter { it.status == AppointmentStatus.COMPLETED }
-            .map { appointment ->
-                val clinicUserId = appointment.clinic?.id ?: return@map BigDecimal.ZERO
-                val clinic = clinicRepository.findByUserId(clinicUserId).orElse(null) ?: return@map BigDecimal.ZERO
-                val fee = clinic.checkingFee ?: BigDecimal.ZERO
-                fee.multiply(clinic.effectiveCommissionRate())
-                    .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP)
+    private fun getClinic(
+        clinicId: UUID
+    ): Clinic =
+        clinicRepository
+            .findByIdWithUser(clinicId)
+            .orElseThrow {
+                ResourceNotFoundException(
+                    "Clinic not found with ID: $clinicId"
+                )
             }
-            .fold(BigDecimal.ZERO, BigDecimal::add)
-            .setScale(2, RoundingMode.HALF_UP)
-    }
 
-    private fun topClinicsByCommission(): List<TopClinicCommissionResponse> {
-        val clinics = clinicRepository.findAll()
-        val result = clinics.map { clinic ->
-            val commission = appointmentRepository.findAllByClinicIdAndAppointmentDateBetween(
-                clinic.id!!,
-                Instant.EPOCH,
-                Instant.now()
-            ).filter { it.status == AppointmentStatus.COMPLETED }
-                .fold(BigDecimal.ZERO) { total, _ ->
-                    val fee = clinic.checkingFee ?: BigDecimal.ZERO
-                    total.add(
-                        fee.multiply(clinic.effectiveCommissionRate())
-                            .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP)
+    // =========================================================================
+    // COMMISSION REVENUE
+    // =========================================================================
+
+    private fun commissionRevenue(
+        month: YearMonth
+    ): BigDecimal {
+
+        val appointments =
+            appointmentRepository
+                .findAllByAppointmentDateBetween(
+                    monthStart(month),
+                    monthStart(
+                        month.plusMonths(1)
                     )
-                }
-            TopClinicCommissionResponse(
-                clinicId = clinic.id!!,
-                clinicName = clinic.clinicName,
-                commission = commission.setScale(2, RoundingMode.HALF_UP),
-                currency = clinic.currency,
-                city = clinic.user?.city ?: City.AMMAN,
-                rating = clinic.rating
-            )
-        }
+                )
 
-        return result.sortedByDescending { it.commission }.take(10)
+        return appointments
+            .filter {
+                it.status ==
+                        AppointmentStatus.COMPLETED
+            }
+            .map { appointment ->
+
+                val clinicUserId =
+                    appointment.clinic?.id
+                        ?: return@map BigDecimal.ZERO
+
+                val clinic =
+                    clinicRepository
+                        .findByUserId(
+                            clinicUserId
+                        )
+                        .orElse(null)
+                        ?: return@map BigDecimal.ZERO
+
+                val fee =
+                    clinic.checkingFee
+                        ?: BigDecimal.ZERO
+
+                fee.multiply(
+                    clinic.effectiveCommissionRate()
+                )
+                    .divide(
+                        BigDecimal.valueOf(100),
+                        4,
+                        RoundingMode.HALF_UP
+                    )
+            }
+            .fold(
+                BigDecimal.ZERO,
+                BigDecimal::add
+            )
+            .setScale(
+                2,
+                RoundingMode.HALF_UP
+            )
     }
 
-    private fun monthStart(month: YearMonth): Instant = month.atDay(1).atStartOfDay(zoneId).toInstant()
+    // =========================================================================
+    // TOP CLINICS
+    // =========================================================================
 
-    private fun logActivity(adminEmail: String, action: String, description: String, clinicId: UUID?) {
-        val adminId = userRepository.findByEmail(adminEmail).map { it.id }.orElse(null)
+    private fun topClinicsByCommission():
+            List<TopClinicCommissionResponse> {
+
+        val clinics =
+            clinicRepository.findAll()
+
+        val result =
+            clinics.map { clinic ->
+
+                val commission =
+                    appointmentRepository
+                        .findAllByClinicIdAndAppointmentDateBetween(
+                            clinic.id!!,
+                            Instant.EPOCH,
+                            Instant.now()
+                        )
+                        .filter {
+                            it.status ==
+                                    AppointmentStatus.COMPLETED
+                        }
+                        .fold(
+                            BigDecimal.ZERO
+                        ) { total, _ ->
+
+                            val fee =
+                                clinic.checkingFee
+                                    ?: BigDecimal.ZERO
+
+                            total.add(
+                                fee.multiply(
+                                    clinic.effectiveCommissionRate()
+                                )
+                                    .divide(
+                                        BigDecimal.valueOf(100),
+                                        4,
+                                        RoundingMode.HALF_UP
+                                    )
+                            )
+                        }
+
+                TopClinicCommissionResponse(
+                    clinicId =
+                        clinic.id!!,
+
+                    clinicName =
+                        clinic.clinicName,
+
+                    commission =
+                        commission.setScale(
+                            2,
+                            RoundingMode.HALF_UP
+                        ),
+
+                    currency =
+                        clinic.currency,
+
+                    city =
+                        clinic.user?.city
+                            ?: City.AMMAN,
+
+                    rating =
+                        clinic.rating
+                )
+            }
+
+        return result
+            .sortedByDescending {
+                it.commission
+            }
+            .take(10)
+    }
+
+    // =========================================================================
+    // DATE HELPERS
+    // =========================================================================
+
+    private fun monthStart(
+        month: YearMonth
+    ): Instant =
+        month
+            .atDay(1)
+            .atStartOfDay(zoneId)
+            .toInstant()
+
+    // =========================================================================
+    // ACTIVITY LOG
+    // =========================================================================
+
+    private fun logActivity(
+        adminEmail: String,
+        action: String,
+        description: String,
+        clinicId: UUID?
+    ) {
+
+        val adminId =
+            userRepository
+                .findByEmail(adminEmail)
+                .map {
+                    it.id
+                }
+                .orElse(null)
+
         adminActivityRepository.save(
             AdminActivity(
-                adminUserId = adminId,
-                action = action,
-                description = description,
-                clinicId = clinicId
+                adminUserId =
+                    adminId,
+                action =
+                    action,
+                description =
+                    description,
+                clinicId =
+                    clinicId
             )
         )
     }
 
-    private fun FxRate.toResponse() = FxRateResponse(id!!, baseCurrency, quoteCurrency, rate, updatedAt)
+    // =========================================================================
+    // MAPPERS
+    // =========================================================================
 
-    private fun AdminActivity.toResponse() = AdminActivityResponse(id!!, action, description, clinicId, createdAt)
+    private fun FxRate.toResponse() =
+        FxRateResponse(
+            id!!,
+            baseCurrency,
+            quoteCurrency,
+            rate,
+            updatedAt
+        )
+
+    private fun AdminActivity.toResponse() =
+        AdminActivityResponse(
+            id!!,
+            action,
+            description,
+            clinicId,
+            createdAt
+        )
 }
