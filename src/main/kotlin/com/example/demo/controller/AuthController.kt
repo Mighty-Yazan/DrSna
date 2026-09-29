@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.util.UUID
 
 @RestController
 @RequestMapping("/api/auth")
@@ -190,12 +191,7 @@ class AuthController(
 
     @PostMapping("/logout")
     fun logout(
-        @AuthenticationPrincipal jwt: Jwt,
-        @CookieValue(
-            name = "refreshToken",
-            required = false
-        )
-        refreshToken: String?
+        @AuthenticationPrincipal jwt: Jwt
     ): ResponseEntity<MessageResponse> {
 
         val jti =
@@ -204,6 +200,14 @@ class AuthController(
         val expiresAt =
             jwt.expiresAt
 
+        val sessionId =
+            jwt.getClaimAsString("sessionId")
+                ?.let {
+                    runCatching {
+                        UUID.fromString(it)
+                    }.getOrNull()
+                }
+
         if (
             jti != null &&
             expiresAt != null
@@ -211,7 +215,7 @@ class AuthController(
             authService.logout(
                 jti,
                 expiresAt.epochSecond,
-                refreshToken
+                sessionId
             )
         }
 

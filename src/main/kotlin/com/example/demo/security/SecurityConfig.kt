@@ -384,12 +384,12 @@ class SecurityConfig(
              * A valid access token must still have a corresponding
              * refresh-session row in the database.
              *
-             * If logout / password change / deactivation deleted
-             * that row, this access token is no longer valid.
+             * If logout / password change / deactivation revoked
+             * that session, this access token is no longer valid.
              */
             val currentSession =
                 refreshTokenRepository
-                    .findBySessionId(sessionId)
+                    .findActiveBySessionId(sessionId)
                     ?: throw JwtException(
                         "Session has been revoked"
                     )

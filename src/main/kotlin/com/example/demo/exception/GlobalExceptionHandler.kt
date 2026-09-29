@@ -102,4 +102,17 @@ class GlobalExceptionHandler(private val messageSource: MessageSource) {
         )
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(errorResponse)
     }
+
+    @ExceptionHandler(RefreshTokenReuseException::class)
+    fun handleRefreshTokenReuse(
+        ex: RefreshTokenReuseException,
+        request: HttpServletRequest
+    ): ResponseEntity<ApiErrorResponse> {
+
+        return buildResponse(
+            HttpStatus.UNAUTHORIZED,
+            ex.message ?: "Refresh token reuse detected",
+            request
+        )
+    }
 }

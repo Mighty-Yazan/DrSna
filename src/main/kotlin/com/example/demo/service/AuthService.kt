@@ -18,6 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
+import java.util.UUID
 
 @Service
 @Transactional
@@ -377,10 +378,12 @@ class AuthService(
         /*
          * Every successful login creates a separate refresh session.
          */
-        val refreshSession =
+        val createdRefreshSession =
             tokenService.createRefreshSession(
                 user
             )
+
+        val refreshSession = createdRefreshSession.session
 
         val accessToken =
             tokenService.generateAccessToken(
@@ -404,7 +407,7 @@ class AuthService(
 
         return Pair(
             loginResponse,
-            refreshSession.token
+            createdRefreshSession.rawToken
         )
     }
 
@@ -630,12 +633,11 @@ class AuthService(
             newRefreshSession?.let {
                 tokenService.generateAccessToken(
                     savedUser,
-                    it
+                    it.session
                 )
             }
 
-        val newRefreshToken =
-            newRefreshSession?.token
+        val newRefreshToken = newRefreshSession?.rawToken
 
         return ProfileUpdateResponse(
             userId =
@@ -672,7 +674,7 @@ class AuthService(
     fun logout(
         jti: String,
         expiresAtEpochSecond: Long,
-        refreshToken: String?
+        sessionId: UUID?
     ) {
 
         val expiresAt =
@@ -685,10 +687,9 @@ class AuthService(
             expiresAt
         )
 
-        if (!refreshToken.isNullOrBlank()) {
-
-            tokenService.deleteByToken(
-                refreshToken
+        if (sessionId != null) {
+            tokenService.revokeRefreshSession(
+                sessionId
             )
         }
     }
@@ -746,10 +747,12 @@ class AuthService(
         /*
          * Create the new session for the current device.
          */
-        val refreshSession =
+        val createdRefreshSession =
             tokenService.createRefreshSession(
                 savedUser
             )
+
+        val refreshSession = createdRefreshSession.session
 
         val newAccessToken =
             tokenService.generateAccessToken(
@@ -771,7 +774,7 @@ class AuthService(
             isActive =
                 savedUser.isActive,
             refreshToken =
-                refreshSession.token
+                createdRefreshSession.rawToken
         )
     }
 }

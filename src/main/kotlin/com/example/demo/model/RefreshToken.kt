@@ -5,128 +5,50 @@ import java.time.Instant
 import java.util.UUID
 
 @Entity
-@Table(
-    name = "refresh_tokens"
-)
+@Table(name = "refresh_tokens")
 class RefreshToken(
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     var id: UUID? = null,
 
-    /*
-     * The actual refresh token value.
+    /**
+     * HMAC-SHA-256 of the raw refresh token.
      *
-     * Every refresh request must present the current value.
-     * After rotation, this exact token is deleted and can never be reused.
+     * The raw bearer token is never persisted.
+     * The existing database column is kept as `token` for a zero-column-rename
+     * migration; the application property is explicitly named `tokenHash`.
      */
-    @Column(
-        nullable = false,
-        unique = true
-    )
-    var token: String,
+    @Column(name = "token", nullable = false, unique = true)
+    var tokenHash: String,
 
-    /*
-     * User who owns this refresh session.
-     */
-    @ManyToOne(
-        fetch = FetchType.LAZY
-    )
-    @JoinColumn(
-        name = "user_id",
-        nullable = false
-    )
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
     var user: User,
 
-    /*
-     * Refresh-token expiration date.
-     *
-     * We keep the refresh session for 7 days, while the access token
-     * itself will be only 1 minute.
-     */
-    @Column(
-        nullable = false
-    )
+    @Column(nullable = false)
     var expiryDate: Instant,
 
-    /*
-     * Identifies ONE browser/device session.
-     *
-     * Example:
-     *
-     * Laptop  -> sessionId = A
-     * Phone   -> sessionId = B
-     * Tablet  -> sessionId = C
-     *
-     * Therefore logging in on one device does not destroy the
-     * sessions of the other devices.
-     */
-    @Column(
-        name = "session_id",
-        nullable = false,
-        unique = true
-    )
+    /** One refresh-token family / browser session. */
+    @Column(name = "session_id", nullable = false)
     var sessionId: UUID = UUID.randomUUID(),
 
-    /*
-     * Version of the refresh session.
-     *
-     * Initial login:
-     *
-     * tokenVersion = 0
-     *
-     * First refresh:
-     *
-     * tokenVersion = 1
-     *
-     * Second refresh:
-     *
-     * tokenVersion = 2
-     *
-     * The access token contains the current version.
-     *
-     * When refresh happens, the old refresh token row is deleted
-     * and the new row receives tokenVersion + 1.
-     *
-     * Therefore the old access token immediately becomes INVALID.
-     */
-    @Column(
-        name = "token_version",
-        nullable = false,
-        columnDefinition = "BIGINT DEFAULT 0 NOT NULL"
-    )
+    @Column(name = "token_version", nullable = false, columnDefinition = "BIGINT DEFAULT 0 NOT NULL")
     var tokenVersion: Long = 0,
 
-    /*
-     * Snapshot of User.securityVersion at the time this session
-     * was created.
-     *
-     * Example:
-     *
-     * securityVersion = 0
-     *
-     * User changes password:
-     *
-     * User.securityVersion = 1
-     *
-     * Old refresh sessions still contain:
-     *
-     * securityVersion = 0
-     *
-     * Therefore they are immediately invalid.
+    @Column(name = "security_version", nullable = false, columnDefinition = "BIGINT DEFAULT 0 NOT NULL")
+    var securityVersion: Long = 0,
+
+    /**
+     * Null means this token is the currently active token in the family.
+     * A non-null value means the token was rotated/revoked and must never be
+     * accepted again.
      */
-    @Column(
-        name = "security_version",
-        nullable = false,
-        columnDefinition = "BIGINT DEFAULT 0 NOT NULL"
-    )
-    var securityVersion: Long = 0
+    @Column(name = "revoked_at")
+    var revokedAt: Instant? = null
 ) {
 
-    /*
-     * Returns true when the refresh session has expired.
-     */
-    fun isExpired(): Boolean {
-        return !Instant.now().isBefore(expiryDate)
-    }
+    fun isExpired(): Boolean = !Instant.now().isBefore(expiryDate)
+
+    fun isRevoked(): Boolean = revokedAt != null
 }

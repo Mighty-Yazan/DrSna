@@ -23,3 +23,9 @@ admin:
     email: ${ADMIN_SEED_EMAIL}
     password: ${ADMIN_SEED_PASSWORD}
     city: ${ADMIN_SEED_CITY}
+
+
+security:
+  refresh-token:
+    hmac-secret: ${REFRESH_TOKEN_HMAC_SECRET}
+    cleanup-interval-ms: ${REFRESH_TOKEN_CLEANUP_INTERVAL_MS:3600000}

@@ -58,6 +58,12 @@ ADMIN_SEED_FULL_NAME=System Administrator
 ADMIN_SEED_EMAIL=ops-admin@drsna.com
 ADMIN_SEED_PASSWORD=Unipass12!
 ADMIN_SEED_CITY=AMMAN
+
+# Generate a suitable value with OpenSSL:
+# openssl rand -base64 32
+
+# Base64-encoded 32+ byte secret used to HMAC refresh tokens
+REFRESH_TOKEN_HMAC_SECRET=<generate-a-random-secret>
 ```
 
 ---
