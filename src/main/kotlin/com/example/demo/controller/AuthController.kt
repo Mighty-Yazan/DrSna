@@ -1,3 +1,4 @@
+
 package com.example.demo.controller
 
 import com.example.demo.dto.*
@@ -10,13 +11,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.oauth2.jwt.Jwt
-import org.springframework.web.bind.annotation.CookieValue
-import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PostMapping
-import org.springframework.web.bind.annotation.PutMapping
-import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.*
 
 @RestController
 @RequestMapping("/api/auth")
@@ -24,302 +19,137 @@ class AuthController(
     private val authService: AuthService
 ) {
 
-    // =========================================================================
-    // REGISTER PATIENT
-    // =========================================================================
-
     @PostMapping("/register/user")
-    fun registerUser(
-        @Valid @RequestBody request: UserRegisterRequest
-    ): ResponseEntity<AuthResponse> {
-
-        val response =
-            authService.registerUser(request)
-
-        return ResponseEntity
-            .status(HttpStatus.CREATED)
-            .body(response)
+    fun registerUser(@Valid @RequestBody request: UserRegisterRequest): ResponseEntity<AuthResponse> {
+        val response = authService.registerUser(request)
+        return ResponseEntity.status(HttpStatus.CREATED).body(response)
     }
-
-    // =========================================================================
-    // REGISTER CLINIC
-    // =========================================================================
 
     @PostMapping("/register/clinic")
-    fun registerClinic(
-        @Valid @RequestBody request: ClinicRegisterRequest
-    ): ResponseEntity<AuthResponse> {
-
-        val response =
-            authService.registerClinic(request)
-
-        return ResponseEntity
-            .status(HttpStatus.CREATED)
-            .body(response)
+    fun registerClinic(@Valid @RequestBody request: ClinicRegisterRequest): ResponseEntity<AuthResponse> {
+        val response = authService.registerClinic(request)
+        return ResponseEntity.status(HttpStatus.CREATED).body(response)
     }
-
-    // =========================================================================
-    // LOGIN
-    // =========================================================================
 
     @PostMapping("/login")
-    fun login(
-        @Valid @RequestBody request: LoginRequest
-    ): ResponseEntity<LoginResponse> {
+    fun login(@Valid @RequestBody request: LoginRequest): ResponseEntity<LoginResponse> {
+        val (loginResponse, refreshToken) = authService.login(request)
 
-        val (loginResponse, refreshToken) =
-            authService.login(request)
-
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .header(
-                HttpHeaders.SET_COOKIE,
-                refreshCookie(
-                    refreshToken,
-                    REFRESH_COOKIE_MAX_AGE
-                ).toString()
-            )
+        return ResponseEntity.ok()
+            .header(HttpHeaders.SET_COOKIE, refreshCookie(refreshToken, REFRESH_COOKIE_MAX_AGE).toString())
             .body(loginResponse)
     }
-
-    // =========================================================================
-    // REFRESH
-    // =========================================================================
 
     @PostMapping("/refresh")
     fun refresh(
-        @CookieValue(
-            name = "refreshToken",
-            required = false
-        )
-        refreshToken: String?
+        @CookieValue(name = "refreshToken", required = false) refreshToken: String?
     ): ResponseEntity<LoginResponse> {
+        val (loginResponse, newRefreshToken) = authService.refresh(refreshToken)
 
-        val (loginResponse, newRefreshToken) =
-            authService.refresh(refreshToken)
-
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .header(
-                HttpHeaders.SET_COOKIE,
-                refreshCookie(
-                    newRefreshToken,
-                    REFRESH_COOKIE_MAX_AGE
-                ).toString()
-            )
+        return ResponseEntity.ok()
+            .header(HttpHeaders.SET_COOKIE, refreshCookie(newRefreshToken, REFRESH_COOKIE_MAX_AGE).toString())
             .body(loginResponse)
     }
 
-    // =========================================================================
-    // GET CURRENT USER PROFILE
-    // =========================================================================
-
+    // Protected: Requires a valid Bearer Token
     @GetMapping("/me")
-    fun getProfile(
-        @AuthenticationPrincipal jwt: Jwt
-    ): ResponseEntity<UserProfileResponse> {
-
-        val userEmail =
-            jwt.subject
-                ?: throw IllegalStateException(
-                    "Invalid JWT subject"
-                )
-
-        val profile =
-            authService.getProfile(userEmail)
-
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .body(profile)
+    fun getProfile(@AuthenticationPrincipal jwt: Jwt): ResponseEntity<UserProfileResponse> {
+        val userEmail = jwt.subject
+        val profile = authService.getProfile(userEmail!!)
+        return ResponseEntity.ok(profile)
     }
 
-    // =========================================================================
-    // UPDATE PATIENT / DOCTOR PROFILE
-    // =========================================================================
-
+    // Edit Info: available to Patient and Doctor accounts only
     @PutMapping("/me")
     @PreAuthorize("hasAnyRole('PATIENT','DOCTOR')")
     fun updateProfile(
         @AuthenticationPrincipal jwt: Jwt,
         @Valid @RequestBody request: UpdateProfileRequest
-    ): ResponseEntity<ProfileUpdateResponse> {
-
-        val userEmail =
-            jwt.subject
-                ?: throw IllegalStateException(
-                    "Invalid JWT subject"
-                )
-
-        val updated =
-            authService.updateProfile(
-                userEmail,
-                request
-            )
-
-        /*
-         * Build the response without using generic type arguments
-         * on ResponseEntity.ok(), because Spring 7's static ok()
-         * does not accept them.
-         */
-        val responseBuilder =
-            ResponseEntity
-                .status(HttpStatus.OK)
-
-        /*
-         * A new refresh token exists only when:
-         * - password changed
-         * - email changed
-         */
-        if (!updated.refreshToken.isNullOrBlank()) {
-
-            responseBuilder.header(
-                HttpHeaders.SET_COOKIE,
-                refreshCookie(
-                    updated.refreshToken,
-                    REFRESH_COOKIE_MAX_AGE
-                ).toString()
+    ): ResponseEntity<UserProfileResponse> {
+        val userEmail = jwt.subject
+        val (profile, newRefreshToken) = authService.updateProfile(userEmail!!, request)
+        
+        var responseBuilder = ResponseEntity.ok()
+        if (newRefreshToken != null) {
+            responseBuilder = responseBuilder.header(
+                HttpHeaders.SET_COOKIE, 
+                refreshCookie(newRefreshToken, REFRESH_COOKIE_MAX_AGE).toString()
             )
         }
-
-        return responseBuilder.body(updated)
+        return responseBuilder.body(profile)
     }
 
-    // =========================================================================
-    // LOGOUT
-    // =========================================================================
-
+    // Protected: Blacklists the current token's JTI so it cannot be reused
     @PostMapping("/logout")
     fun logout(
         @AuthenticationPrincipal jwt: Jwt,
-        @CookieValue(
-            name = "refreshToken",
-            required = false
-        )
-        refreshToken: String?
+        @CookieValue(name = "refreshToken", required = false) refreshToken: String?
     ): ResponseEntity<MessageResponse> {
-
-        val jti =
-            jwt.id
-
-        val expiresAt =
-            jwt.expiresAt
-
-        if (
-            jti != null &&
-            expiresAt != null
-        ) {
-            authService.logout(
-                jti,
-                expiresAt.epochSecond,
-                refreshToken
-            )
+        val jti = jwt.id
+        val expiresAt = jwt.expiresAt
+        if (jti != null && expiresAt != null) {
+            authService.logout(jti, expiresAt.epochSecond, refreshToken)
         }
 
-        /*
-         * Remove the refresh cookie from the browser.
-         */
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .header(
-                HttpHeaders.SET_COOKIE,
-                refreshCookie(
-                    "",
-                    0
-                ).toString()
-            )
-            .body(
-                MessageResponse(
-                    "Logged out successfully"
-                )
-            )
+        return ResponseEntity.ok()
+            .header(HttpHeaders.SET_COOKIE, refreshCookie("", 0).toString())
+            .body(MessageResponse("Logged out successfully"))
     }
-
-    // =========================================================================
-    // REGISTER ADMIN
-    // =========================================================================
 
     @PostMapping("/register/admin")
     @PreAuthorize("hasRole('ADMIN')")
     fun registerAdmin(
         @Valid @RequestBody request: AdminRegisterRequest
     ): ResponseEntity<AuthResponse> {
-
-        val response =
-            authService.registerAdmin(request)
-
-        return ResponseEntity
-            .status(HttpStatus.CREATED)
-            .body(response)
+        val response = authService.registerAdmin(request)
+        return ResponseEntity.status(HttpStatus.CREATED).body(response)
     }
 
-    // =========================================================================
-    // CHANGE PASSWORD
-    // =========================================================================
+data class VerifyPasswordRequest(val password: String)
+
+    @PostMapping("/verify-password")
+    @PreAuthorize("isAuthenticated()")
+    fun verifyPassword(
+        @AuthenticationPrincipal jwt: Jwt,
+        @RequestBody request: VerifyPasswordRequest
+    ): ResponseEntity<MessageResponse> {
+        val email = jwt.subject ?: throw IllegalStateException("Invalid JWT subject")
+        val isValid = authService.verifyPassword(email, request.password)
+        return if (isValid) {
+            ResponseEntity.ok(MessageResponse("Password is correct"))
+        } else {
+            ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(MessageResponse("Incorrect password"))
+        }
+    }
 
     @PutMapping("/change-password")
     @PreAuthorize("hasRole('ADMIN')")
     fun changePassword(
         @AuthenticationPrincipal jwt: Jwt,
         @Valid @RequestBody request: ChangePasswordRequest
-    ): ResponseEntity<PasswordChangeResponse> {
-
-        val email =
-            jwt.subject
-                ?: throw IllegalStateException(
-                    "Invalid JWT subject"
-                )
-
-        val response =
-            authService.changePassword(
-                email,
-                request
-            )
-
-        /*
-         * changePassword() creates a completely new session
-         * after revoking every previous session.
-         */
-        return ResponseEntity
-            .status(HttpStatus.OK)
-            .header(
-                HttpHeaders.SET_COOKIE,
-                refreshCookie(
-                    response.refreshToken,
-                    REFRESH_COOKIE_MAX_AGE
-                ).toString()
-            )
-            .body(response)
+    ): ResponseEntity<MessageResponse> {
+        val email = jwt.subject ?: throw IllegalStateException("Invalid JWT subject")
+        val response = authService.changePassword(email, request)
+        return ResponseEntity.ok(response)
     }
 
-    // =========================================================================
-    // REFRESH TOKEN COOKIE
-    // =========================================================================
-
-    private fun refreshCookie(
-        value: String,
-        maxAgeSeconds: Long
-    ): ResponseCookie {
-
-        return ResponseCookie
-            .from(
-                "refreshToken",
-                value
-            )
+    private companion object {
+        const val REFRESH_COOKIE_MAX_AGE = 7L * 24 * 60 * 60 // 7 days in seconds
+    }
+    /**
+     * Single source of truth for the refresh-token cookie.
+     * Login, refresh and logout MUST use identical Path (and other attributes):
+     * the browser identifies a cookie by name + domain + path, so a mismatch
+     * leaves two "refreshToken" cookies behind and the stale one gets sent.
+     */
+    private fun refreshCookie(value: String, maxAgeSeconds: Long): ResponseCookie =
+        ResponseCookie.from("refreshToken", value)
             .httpOnly(true)
-            .secure(false)
+            .secure(false) // Set to true in production over HTTPS
             .path("/api/auth")
             .maxAge(maxAgeSeconds)
             .sameSite("Strict")
             .build()
-    }
 
-    private companion object {
-
-        /*
-         * Refresh cookie lifetime:
-         * 7 days.
-         */
-        const val REFRESH_COOKIE_MAX_AGE =
-            7L * 24 * 60 * 60
-    }
 }
+ 

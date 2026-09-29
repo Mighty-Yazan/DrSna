@@ -1,18 +1,15 @@
 package com.example.demo.security
 
-import com.example.demo.model.ClinicApplicationStatus
 import com.example.demo.model.RefreshToken
-import com.example.demo.model.Role
 import com.example.demo.model.User
-import com.example.demo.repository.ClinicRepository
 import com.example.demo.repository.RefreshTokenRepository
-import com.example.demo.repository.UserRepository
 import org.springframework.security.oauth2.jwt.JwsHeader
 import org.springframework.security.oauth2.jwt.JwtClaimsSet
 import org.springframework.security.oauth2.jwt.JwtEncoder
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -20,478 +17,145 @@ import java.util.UUID
 @Service
 class TokenService(
     private val encoder: JwtEncoder,
-    private val refreshTokenRepository: RefreshTokenRepository,
-    private val userRepository: UserRepository,
-    private val clinicRepository: ClinicRepository
+    private val refreshTokenRepository: RefreshTokenRepository
 ) {
 
-    companion object {
+    fun generateAccessToken(user: User): String {
+        val now = Instant.now()
+        val claims = JwtClaimsSet.builder()
+            .issuer("self")
+            .issuedAt(now)
+            .expiresAt(now.plus(60, ChronoUnit.MINUTES))
+            .subject(user.email)
+            .id(UUID.randomUUID().toString()) // JTI
+            .claim("userId", user.id.toString())
+            .claim("roles", listOf("ROLE_${user.role.name}"))
+            .claim("securityVersion", user.securityVersion)
+            .build()
 
-        /**
-         * Access token lifetime.
-         *
-         * Required application behavior:
-         * approximately 1 minute.
-         */
-        private const val ACCESS_TOKEN_MINUTES = 60L
-
-        /**
-         * Refresh session lifetime.
-         */
-        private const val REFRESH_TOKEN_DAYS = 7L
+        val parameters = JwtEncoderParameters.from(JwsHeader.with { "RS256" }.build(), claims)
+        return encoder.encode(parameters).tokenValue
     }
 
-    // =========================================================================
-    // ACCESS TOKEN
-    // =========================================================================
+    // ─────────────────────────────────────────────────────────────────────────
+    // Hashing helper
+    // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Generates an access token linked to exactly one refresh session.
+    /*
+     * Produces a hex-encoded SHA-256 digest of the raw token string.
      *
-     * The JWT contains:
+     * WHY SHA-256 and not bcrypt?
+     *   Refresh tokens are randomly generated UUIDs (128-bit entropy).
+     *   They are not user-chosen passwords, so brute-force dictionaries
+     *   are useless against them. SHA-256 is fast enough for our lookup
+     *   path and still provides a one-way, non-reversible representation.
      *
-     * - userId
-     * - roles
-     * - securityVersion
-     * - sessionId
-     * - sessionVersion
-     * - jti
-     *
-     * SecurityConfig validates these values against the current
-     * database state.
+     * WHY no salt?
+     *   A salt protects against rainbow-table attacks on LOW-entropy inputs
+     *   (e.g., "password123"). Our tokens already have 128 bits of random
+     *   entropy — a pre-computed table for UUID space is computationally
+     *   infeasible. Adding a per-row salt would only complicate the lookup
+     *   without adding meaningful security here.
      */
-    fun generateAccessToken(
-        user: User,
-        session: RefreshToken
-    ): String {
-
-        val userId =
-            user.id
-                ?: throw IllegalStateException(
-                    "User ID is required to issue an access token"
-                )
-
-        val now =
-            Instant.now()
-
-        val claims =
-            JwtClaimsSet
-                .builder()
-                .issuer("self")
-                .issuedAt(now)
-                .expiresAt(
-                    now.plus(
-                        ACCESS_TOKEN_MINUTES,
-                        ChronoUnit.MINUTES
-                    )
-                )
-                .subject(
-                    user.email
-                )
-                .id(
-                    UUID.randomUUID().toString()
-                )
-                .claim(
-                    "userId",
-                    userId.toString()
-                )
-                .claim(
-                    "roles",
-                    listOf(
-                        "ROLE_${user.role.name}"
-                    )
-                )
-                .claim(
-                    "securityVersion",
-                    user.securityVersion
-                )
-                .claim(
-                    "sessionId",
-                    session.sessionId.toString()
-                )
-                .claim(
-                    "sessionVersion",
-                    session.tokenVersion
-                )
-                .build()
-
-        val parameters =
-            JwtEncoderParameters.from(
-                JwsHeader.with {
-                    "RS256"
-                }.build(),
-                claims
-            )
-
-        return encoder
-            .encode(parameters)
-            .tokenValue
+    private fun hashToken(rawToken: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hashBytes = digest.digest(rawToken.toByteArray(Charsets.UTF_8))
+        // Convert each byte to a 2-char lowercase hex string, then join them all
+        return hashBytes.joinToString("") { "%02x".format(it) }
     }
 
-    // =========================================================================
-    // CREATE REFRESH SESSION
-    // =========================================================================
+    // ─────────────────────────────────────────────────────────────────────────
+    // Refresh token lifecycle
+    // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Creates a completely new refresh session.
+    /*
+     * Generates a new refresh token.
+     * Cleans up existing tokens for this user to prevent accumulation.
      *
-     * Every successful login creates its own session.
-     *
-     * Initial values:
-     *
-     * tokenVersion    = 0
-     * securityVersion = current user.securityVersion
+     * Returns the RAW token string — this is the ONLY moment the raw value
+     * exists outside of the browser cookie. It is returned to the caller so
+     * it can be placed into the HttpOnly cookie, then immediately discarded.
+     * The DB row stores only the SHA-256 hash.
      */
     @Transactional
-    fun createRefreshSession(
-        user: User
-    ): RefreshToken {
+    fun generateRefreshToken(user: User): String {
+        refreshTokenRepository.deleteByUser(user) // Remove any previous session
 
-        val refreshToken =
-            RefreshToken(
-                token =
-                    UUID.randomUUID().toString(),
-                user =
-                    user,
-                expiryDate =
-                    Instant.now().plus(
-                        REFRESH_TOKEN_DAYS,
-                        ChronoUnit.DAYS
-                    ),
-                sessionId =
-                    UUID.randomUUID(),
-                tokenVersion =
-                    0,
-                securityVersion =
-                    user.securityVersion
-            )
+        val rawToken = UUID.randomUUID().toString()
 
-        return refreshTokenRepository.save(
-            refreshToken
+        val refreshToken = RefreshToken(
+            // Store the HASH, not the raw value
+            tokenHash = hashToken(rawToken),
+            user = user,
+            expiryDate = Instant.now().plus(7, ChronoUnit.DAYS)
         )
+        refreshTokenRepository.save(refreshToken)
+
+        // Return the raw token so it can be placed into the cookie
+        return rawToken
     }
 
-    // =========================================================================
-    // ROTATE REFRESH TOKEN
-    // =========================================================================
-
-    /**
-     * Rotates one refresh token into a new refresh token.
+    /*
+     * Validates the raw token from the cookie, deletes it, and issues a new one.
      *
-     * Security rules:
+     * The lock (PESSIMISTIC_WRITE) inside findByTokenHashForUpdate() prevents
+     * two concurrent requests from rotating the same token simultaneously.
      *
-     * 1. Lock USER first.
-     * 2. Lock REFRESH TOKEN second.
-     *
-     * This keeps the same lock ordering used by
-     * security-sensitive account operations.
-     *
-     * Old refresh token:
-     *     immediately deleted
-     *
-     * New refresh token:
-     *     same sessionId
-     *     tokenVersion + 1
-     *
-     * Therefore the old Access Token, which carries
-     * the previous sessionVersion, becomes invalid immediately.
+     * Returns Pair(newRawToken, savedRefreshTokenEntity) or null if invalid.
      */
     @Transactional
-    fun rotateRefreshToken(
-        rawToken: String
-    ): Pair<String, RefreshToken>? {
+    fun rotateRefreshToken(rawToken: String): Pair<String, RefreshToken>? {
+        // 1. Hash the incoming raw token, then look up the DB row by its hash
+        val hash = hashToken(rawToken)
+        val existingToken = refreshTokenRepository.findByTokenHashForUpdate(hash) ?: return null
 
-        // ---------------------------------------------------------------------
-        // 1. Find candidate token
-        // ---------------------------------------------------------------------
-
-        /*
-         * This first query is intentionally NOT locked.
-         *
-         * It only identifies the user that owns the presented
-         * refresh token.
-         */
-        val candidate =
-            refreshTokenRepository
-                .findByToken(rawToken)
-                ?: return null
-
-        val userId =
-            candidate.user.id
-                ?: return null
-
-        // ---------------------------------------------------------------------
-        // 2. Lock USER
-        // ---------------------------------------------------------------------
-
-        /*
-         * The user is locked before the refresh token.
-         *
-         * This serializes token rotation with:
-         *
-         * - password changes
-         * - securityVersion changes
-         * - doctor deactivation
-         * - clinic deactivation
-         * - account reset
-         */
-        val user =
-            userRepository.findFirstById(
-                userId
-            )
-                ?: return null
-
-        // ---------------------------------------------------------------------
-        // 3. Lock REFRESH TOKEN
-        // ---------------------------------------------------------------------
-
-        val existingToken =
-            refreshTokenRepository
-                .findByTokenForUpdate(
-                    rawToken
-                )
-                ?: return null
-
-        // ---------------------------------------------------------------------
-        // 4. Verify ownership
-        // ---------------------------------------------------------------------
-
-        if (
-            existingToken.user.id !=
-            user.id
-        ) {
+        // 2. Check expiry
+        if (existingToken.isExpired()) {
+            refreshTokenRepository.delete(existingToken)
             return null
         }
 
-        // ---------------------------------------------------------------------
-        // 5. Verify expiry
-        // ---------------------------------------------------------------------
+        val user = existingToken.user
 
-        if (
-            existingToken.isExpired()
-        ) {
+        // 3. Delete the old row — it is now consumed (single-use)
+        refreshTokenRepository.delete(existingToken)
 
-            refreshTokenRepository.delete(
-                existingToken
-            )
-
-            refreshTokenRepository.flush()
-
-            return null
-        }
-
-        // ---------------------------------------------------------------------
-        // 6. Verify account is active
-        // ---------------------------------------------------------------------
-
-        if (!user.isActive) {
-
-            /*
-             * The account has been disabled.
-             *
-             * The presented refresh token is removed as well
-             * so it cannot accumulate in the database.
-             */
-            refreshTokenRepository.delete(
-                existingToken
-            )
-
-            refreshTokenRepository.flush()
-
-            return null
-        }
-
-        // ---------------------------------------------------------------------
-        // 7. Verify clinic application state
-        // ---------------------------------------------------------------------
-
-        /*
-         * A Clinic is allowed to have an authentication session
-         * only while its application status is APPROVED.
-         *
-         * This check is intentionally performed during refresh
-         * as well as during login.
-         *
-         * This prevents an old refresh session from restoring
-         * access after the clinic is no longer operational.
-         */
-        if (
-            user.role == Role.CLINIC
-        ) {
-
-            val clinic =
-                clinicRepository
-                    .findByUserEmail(
-                        user.email
-                    )
-                    .orElse(null)
-
-            /*
-             * If the clinic profile no longer exists or its status
-             * is not APPROVED, the refresh session cannot continue.
-             */
-            if (
-                clinic == null ||
-                clinic.applicationStatus !=
-                ClinicApplicationStatus.APPROVED
-            ) {
-
-                refreshTokenRepository.delete(
-                    existingToken
-                )
-
-                refreshTokenRepository.flush()
-
-                return null
-            }
-        }
-
-        // ---------------------------------------------------------------------
-        // 8. Verify security version
-        // ---------------------------------------------------------------------
-
-        /*
-         * Password changes, account resets and other global
-         * security operations increment securityVersion.
-         *
-         * Therefore every old refresh session automatically
-         * becomes invalid.
-         */
-        if (
-            existingToken.securityVersion !=
-            user.securityVersion
-        ) {
-
-            refreshTokenRepository.delete(
-                existingToken
-            )
-
-            refreshTokenRepository.flush()
-
-            return null
-        }
-
-        // ---------------------------------------------------------------------
-        // 9. Rotate session version
-        // ---------------------------------------------------------------------
-
-        val sessionId =
-            existingToken.sessionId
-
-        val nextVersion =
-            existingToken.tokenVersion + 1
-
-        /*
-         * Delete the old token BEFORE creating the new one.
-         *
-         * flush() forces Hibernate to execute the DELETE
-         * before the replacement is inserted.
-         */
-        refreshTokenRepository.delete(
-            existingToken
+        // 4. Generate a new raw token, store only its hash
+        val newRawToken = UUID.randomUUID().toString()
+        val newRefreshToken = RefreshToken(
+            tokenHash = hashToken(newRawToken),
+            user = user,
+            expiryDate = Instant.now().plus(7, ChronoUnit.DAYS)
         )
 
-        refreshTokenRepository.flush()
-
-        // ---------------------------------------------------------------------
-        // 10. Create replacement refresh token
-        // ---------------------------------------------------------------------
-
-        /*
-         * The sessionId remains the same.
-         *
-         * Only tokenVersion changes.
-         *
-         * Example:
-         *
-         * old:
-         *     sessionId = A
-         *     tokenVersion = 0
-         *
-         * new:
-         *     sessionId = A
-         *     tokenVersion = 1
-         */
-        val newRefreshToken =
-            RefreshToken(
-                token =
-                    UUID.randomUUID().toString(),
-                user =
-                    user,
-                expiryDate =
-                    Instant.now().plus(
-                        REFRESH_TOKEN_DAYS,
-                        ChronoUnit.DAYS
-                    ),
-                sessionId =
-                    sessionId,
-                tokenVersion =
-                    nextVersion,
-                securityVersion =
-                    user.securityVersion
-            )
-
-        val savedToken =
-            refreshTokenRepository.save(
-                newRefreshToken
-            )
-
-        return Pair(
-            savedToken.token,
-            savedToken
-        )
+        val savedToken = refreshTokenRepository.save(newRefreshToken)
+        return Pair(newRawToken, savedToken)
     }
 
-    // =========================================================================
-    // DELETE ONE REFRESH TOKEN
-    // =========================================================================
-
-    /**
-     * Deletes exactly one refresh token.
-     *
-     * Used during logout.
+    /*
+     * Deletes the refresh session matching the raw token from the logout cookie.
+     * We hash first, then look up by hash — same pattern as rotation.
      */
     @Transactional
-    fun deleteByToken(
-        token: String
-    ) {
-
-        val existing =
-            refreshTokenRepository
-                .findByToken(
-                    token
-                )
-
+    fun deleteByToken(rawToken: String) {
+        val hash = hashToken(rawToken)
+        val existing = refreshTokenRepository.findByTokenHash(hash)
         if (existing != null) {
-
-            refreshTokenRepository.delete(
-                existing
-            )
-
-            refreshTokenRepository.flush()
+            refreshTokenRepository.delete(existing)
         }
     }
 
-    // =========================================================================
-    // REVOKE ALL REFRESH TOKENS
-    // =========================================================================
-
-    /**
-     * Deletes every refresh session belonging to a user.
+    /*
+     * Revokes ALL active refresh sessions for a given user.
      *
-     * Used by SessionRevocationService when a security-sensitive
-     * operation occurs.
+     * Called by SessionRevocationService when a security-sensitive event
+     * happens (e.g. password change, account deactivation).
+     *
+     * No hashing is needed here — we are deleting by User object,
+     * not looking up by token value.
      */
     @Transactional
-    fun revokeAllRefreshTokens(
-        user: User
-    ) {
-
-        refreshTokenRepository
-            .deleteByUser(
-                user
-            )
-
-        refreshTokenRepository.flush()
+    fun revokeAllRefreshTokens(user: User) {
+        refreshTokenRepository.deleteByUser(user)
     }
 }

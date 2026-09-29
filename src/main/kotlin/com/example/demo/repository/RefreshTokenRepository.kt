@@ -15,13 +15,14 @@ import java.util.UUID
 interface RefreshTokenRepository : JpaRepository<RefreshToken, UUID> {
 
     /*
-     * Normal lookup.
+     * Normal lookup by the SHA-256 hash of the raw token.
      *
-     * Used when we only need to find whether a refresh token exists
+     * The caller must hash the raw cookie value before calling this method.
+     * Used when we only need to find whether a refresh session exists
      * and which user owns it.
      */
-    fun findByToken(
-        token: String
+    fun findByTokenHash(
+        tokenHash: String
     ): RefreshToken?
 
     /*
@@ -45,10 +46,10 @@ interface RefreshTokenRepository : JpaRepository<RefreshToken, UUID> {
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
-        "select r from RefreshToken r where r.token = :token"
+        "select r from RefreshToken r where r.tokenHash = :tokenHash"
     )
-    fun findByTokenForUpdate(
-        @Param("token") token: String
+    fun findByTokenHashForUpdate(
+        @Param("tokenHash") tokenHash: String
     ): RefreshToken?
 
     /*

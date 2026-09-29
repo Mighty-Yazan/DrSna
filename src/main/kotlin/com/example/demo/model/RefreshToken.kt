@@ -15,16 +15,25 @@ class RefreshToken(
     var id: UUID? = null,
 
     /*
-     * The actual refresh token value.
+     * SHA-256 hash of the raw refresh token.
      *
-     * Every refresh request must present the current value.
-     * After rotation, this exact token is deleted and can never be reused.
+     * The database NEVER stores the raw token — only this one-way hash.
+     *
+     * Lookup flow:
+     *   1. Browser sends raw token via HttpOnly cookie.
+     *   2. Server hashes it with SHA-256.
+     *   3. Server queries the DB for this hash.
+     *
+     * Even if an attacker reads this column, they cannot submit it to
+     * /api/auth/refresh — the server would hash it again, producing a
+     * completely different value that matches nothing in the DB.
      */
     @Column(
+        name = "token_hash",
         nullable = false,
         unique = true
     )
-    var token: String,
+    var tokenHash: String,
 
     /*
      * User who owns this refresh session.

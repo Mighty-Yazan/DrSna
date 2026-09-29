@@ -13,10 +13,10 @@ import com.example.demo.repository.UserRepository
 import com.example.demo.security.SessionRevocationService
 import com.example.demo.security.TokenBlacklistService
 import com.example.demo.security.TokenService
-import org.springframework.http.HttpStatus
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.http.HttpStatus
 import org.springframework.web.server.ResponseStatusException
 
 @Service
@@ -30,161 +30,83 @@ class AuthService(
     private val sessionRevocationService: SessionRevocationService
 ) {
 
-    // =========================================================================
-    // REGISTER PATIENT
-    // =========================================================================
-
-    fun registerUser(
-        request: UserRegisterRequest
-    ): AuthResponse {
-
+    fun registerUser(request: UserRegisterRequest): AuthResponse {
         if (request.password != request.confirmPassword) {
             throw PasswordMismatchException()
         }
 
-        val normalizedEmail =
-            request.email
-                .trim()
-                .lowercase()
+        val normalizedEmail = request.email.trim().lowercase()
 
         if (userRepository.existsByEmail(normalizedEmail)) {
-            throw DuplicateResourceException(
-                "Email is already registered: $normalizedEmail"
-            )
+            throw DuplicateResourceException("Email is already registered: $normalizedEmail")
         }
 
-        val newUser =
-            User(
-                fullName =
-                    request.fullName.trim(),
-                email =
-                    normalizedEmail,
-                password =
-                    passwordEncoder.encode(
-                        request.password
-                    )!!,
-                city =
-                    request.city,
-                role =
-                    Role.PATIENT
-            )
+        val newUser = User(
+            fullName = request.fullName.trim(),
+            email = normalizedEmail,
+            password = passwordEncoder.encode(request.password)!!,
+            city = request.city,
+            role = Role.PATIENT
+        )
 
-        val savedUser =
-            userRepository.save(
-                newUser
-            )
+        val savedUser = userRepository.save(newUser)
 
         return AuthResponse(
-            message =
-                "User registered successfully",
-            userId =
-                savedUser.id,
-            email =
-                savedUser.email,
-            role =
-                savedUser.role
+            message = "User registered successfully",
+            userId = savedUser.id,
+            email = savedUser.email,
+            role = savedUser.role
         )
     }
 
-    // =========================================================================
-    // REGISTER CLINIC
-    // =========================================================================
-
-    fun registerClinic(
-        request: ClinicRegisterRequest
-    ): AuthResponse {
-
+    fun registerClinic(request: ClinicRegisterRequest): AuthResponse {
         if (request.password != request.confirmPassword) {
             throw PasswordMismatchException()
         }
 
-        val normalizedEmail =
-            request.email
-                .trim()
-                .lowercase()
+        val normalizedEmail = request.email.trim().lowercase()
 
         if (userRepository.existsByEmail(normalizedEmail)) {
-            throw DuplicateResourceException(
-                "Email is already registered: $normalizedEmail"
-            )
+            throw DuplicateResourceException("Email is already registered: $normalizedEmail")
         }
 
-        val licenseNumber =
-            request.clinicLicenseNumber.trim()
-
-        if (
-            userRepository
-                .existsByClinicLicenseNumber(
-                    licenseNumber
-                )
-        ) {
-            throw DuplicateResourceException(
-                "Clinic license number is already registered: $licenseNumber"
-            )
+        if (userRepository.existsByClinicLicenseNumber(request.clinicLicenseNumber.trim())) {
+            throw DuplicateResourceException("Clinic license number is already registered: ${request.clinicLicenseNumber}")
         }
 
-        val newUser =
-            User(
-                fullName =
-                    request.clinicName.trim(),
-                email =
-                    normalizedEmail,
-                password =
-                    passwordEncoder.encode(
-                        request.password
-                    )!!,
-                city =
-                    request.city,
-                role =
-                    Role.CLINIC,
-                clinicLicenseNumber =
-                    licenseNumber
-            )
+        val newUser = User(
+            fullName = request.clinicName.trim(),
+            email = normalizedEmail,
+            password = passwordEncoder.encode(request.password)!!,
+            city = request.city,
+            role = Role.CLINIC,
+            clinicLicenseNumber = request.clinicLicenseNumber.trim()
+        )
 
-        val savedUser =
-            userRepository.save(
-                newUser
-            )
+        val savedUser = userRepository.save(newUser)
 
         clinicRepository.save(
             Clinic(
-                user =
-                    savedUser,
-                clinicName =
-                    savedUser.fullName,
-                applicationStatus =
-                    ClinicApplicationStatus.PENDING
+                user = savedUser,
+                clinicName = savedUser.fullName,
+                applicationStatus = ClinicApplicationStatus.PENDING
             )
         )
 
         return AuthResponse(
-            message =
-                "Clinic registered successfully",
-            userId =
-                savedUser.id,
-            email =
-                savedUser.email,
-            role =
-                savedUser.role
+            message = "Clinic registered successfully",
+            userId = savedUser.id,
+            email = savedUser.email,
+            role = savedUser.role
         )
     }
 
-    // =========================================================================
-    // REGISTER ADMIN
-    // =========================================================================
-
-    fun registerAdmin(
-        request: AdminRegisterRequest
-    ): AuthResponse {
-
+    fun registerAdmin(request: AdminRegisterRequest): AuthResponse {
         if (request.password != request.confirmPassword) {
             throw PasswordMismatchException()
         }
 
-        val normalizedEmail =
-            request.email
-                .trim()
-                .lowercase()
+        val normalizedEmail = request.email.trim().lowercase()
 
         if (userRepository.existsByEmail(normalizedEmail)) {
             throw DuplicateResourceException(
@@ -192,586 +114,170 @@ class AuthService(
             )
         }
 
-        val newAdmin =
-            User(
-                fullName =
-                    request.fullName.trim(),
-                email =
-                    normalizedEmail,
-                password =
-                    passwordEncoder.encode(
-                        request.password
-                    )!!,
-                city =
-                    request.city,
-                role =
-                    Role.ADMIN,
-                isActive =
-                    false
-            )
+        val newAdmin = User(
+            fullName = request.fullName.trim(),
+            email = normalizedEmail,
+            password = passwordEncoder.encode(request.password)!!,
+            city = request.city,
+            role = Role.ADMIN,
+            isActive = false,
+        )
 
-        val savedAdmin =
-            userRepository.save(
-                newAdmin
-            )
+        val savedAdmin = userRepository.save(newAdmin)
 
         return AuthResponse(
-            message =
-                "Admin registered successfully",
-            userId =
-                savedAdmin.id,
-            email =
-                savedAdmin.email,
-            role =
-                savedAdmin.role
+            message = "Admin registered successfully",
+            userId = savedAdmin.id,
+            email = savedAdmin.email,
+            role = savedAdmin.role
         )
     }
 
-    // =========================================================================
-    // LOGIN
-    // =========================================================================
+    fun login(request: LoginRequest): Pair<LoginResponse, String> {
+        val normalizedEmail = request.email.trim().lowercase()
 
-    fun login(
-        request: LoginRequest
-    ): Pair<LoginResponse, String> {
+        val user = userRepository.findByEmail(normalizedEmail)
+            .orElseThrow { InvalidCredentialsException("Invalid email or password") }
 
-        val normalizedEmail =
-            request.email
-                .trim()
-                .lowercase()
-
-        val user =
-            userRepository
-                .findByEmailForUpdate(
-                    normalizedEmail
-                )
-                .orElseThrow {
-                    InvalidCredentialsException(
-                        "Invalid email or password"
-                    )
-                }
-
-        /*
-         * Verify the password before exposing
-         * account/application-specific information.
-         */
-        if (
-            !passwordEncoder.matches(
-                request.password,
-                user.password
-            )
-        ) {
-            throw InvalidCredentialsException(
-                "Invalid email or password"
-            )
+        if (!user.isActive && user.role != Role.ADMIN && user.role != Role.CLINIC) {
+            throw InvalidCredentialsException("Account is inactive")
         }
 
-        // ---------------------------------------------------------------------
-        // ADMIN
-        // ---------------------------------------------------------------------
-
-        if (user.role == Role.ADMIN) {
-
-            return issueLoginSession(
-                user
-            )
+        if (!passwordEncoder.matches(request.password, user.password)) {
+            throw InvalidCredentialsException("Invalid email or password")
         }
 
-        // ---------------------------------------------------------------------
-        // PATIENT / DOCTOR
-        // ---------------------------------------------------------------------
+        val token = tokenService.generateAccessToken(user)
+        val refreshToken = tokenService.generateRefreshToken(user)
 
-        if (!user.isActive) {
-            throw InvalidCredentialsException(
-                "Account is inactive"
-            )
-        }
-
-        // ---------------------------------------------------------------------
-        // CLINIC APPLICATION STATUS
-        // ---------------------------------------------------------------------
-
-        if (user.role == Role.CLINIC) {
-
-            val clinic =
-                clinicRepository
-                    .findByUserEmail(
-                        normalizedEmail
-                    )
-                    .orElseThrow {
-                        IllegalStateException(
-                            "Clinic profile not found for user: $normalizedEmail"
-                        )
-                    }
-
-            when (clinic.applicationStatus) {
-
-                ClinicApplicationStatus.PENDING -> {
-
-                    /*
-                     * Pending clinics receive no session.
-                     */
-                    throw InvalidCredentialsException(
-                        "Clinic application is pending admin approval."
-                    )
-                }
-
-                ClinicApplicationStatus.REJECTED -> {
-
-                    /*
-                     * Rejected clinics receive no session.
-                     */
-                    val reason =
-                        clinic.rejectionReason
-                            ?.trim()
-                            ?.takeIf {
-                                it.isNotBlank()
-                            }
-
-                    throw InvalidCredentialsException(
-                        if (reason != null) {
-                            "Clinic application was rejected: $reason"
-                        } else {
-                            "Clinic application was rejected."
-                        }
-                    )
-                }
-
-                ClinicApplicationStatus.REMOVED -> {
-
-                    /*
-                     * Removed clinics are permanently unavailable
-                     * for normal clinic authentication.
-                     *
-                     * No Access Token.
-                     * No Refresh Token.
-                     */
-                    throw InvalidCredentialsException(
-                        "Clinic has been removed from the platform."
-                    )
-                }
-
-                ClinicApplicationStatus.APPROVED -> {
-
-                    /*
-                     * Only APPROVED clinics may receive
-                     * Access + Refresh tokens.
-                     */
-                }
-            }
-        }
-
-        return issueLoginSession(
-            user
+        val loginResponse = LoginResponse(
+            token = token,
+            userId = user.id,
+            email = user.email,
+            role = user.role,
+            isActive = user.isActive
         )
+        return Pair(loginResponse, refreshToken)
     }
 
-    // =========================================================================
-    // CREATE LOGIN SESSION
-    // =========================================================================
-
-    private fun issueLoginSession(
-        user: User
-    ): Pair<LoginResponse, String> {
-
-        /*
-         * Every successful login creates a separate refresh session.
-         */
-        val refreshSession =
-            tokenService.createRefreshSession(
-                user
-            )
-
-        val accessToken =
-            tokenService.generateAccessToken(
-                user,
-                refreshSession
-            )
-
-        val loginResponse =
-            LoginResponse(
-                token =
-                    accessToken,
-                userId =
-                    user.id,
-                email =
-                    user.email,
-                role =
-                    user.role,
-                isActive =
-                    user.isActive
-            )
-
-        return Pair(
-            loginResponse,
-            refreshSession.token
-        )
-    }
-
-    // =========================================================================
-    // REFRESH
-    // =========================================================================
-
-    fun refresh(
-        refreshTokenString: String?
-    ): Pair<LoginResponse, String> {
-
+    fun refresh(refreshTokenString: String?): Pair<LoginResponse, String> {
         if (refreshTokenString.isNullOrBlank()) {
-            throw ResponseStatusException(
-                HttpStatus.UNAUTHORIZED,
-                "Refresh token is missing"
-            )
+            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token is missing")
         }
 
-        val result =
-            tokenService
-                .rotateRefreshToken(
-                    refreshTokenString
-                )
-                ?: throw ResponseStatusException(
-                    HttpStatus.UNAUTHORIZED,
-                    "Invalid or expired refresh token"
-                )
+        val (newRefreshTokenString, newRefreshToken) = tokenService.rotateRefreshToken(refreshTokenString)
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid or expired refresh token")
 
-        val newRefreshTokenString =
-            result.first
+        val user = newRefreshToken.user
+        val newAccessToken = tokenService.generateAccessToken(user)
 
-        val newRefreshToken =
-            result.second
-
-        val user =
-            newRefreshToken.user
-
-        val newAccessToken =
-            tokenService.generateAccessToken(
-                user,
-                newRefreshToken
-            )
-
-        val loginResponse =
-            LoginResponse(
-                token =
-                    newAccessToken,
-                userId =
-                    user.id,
-                email =
-                    user.email,
-                role =
-                    user.role,
-                isActive =
-                    user.isActive
-            )
-
-        return Pair(
-            loginResponse,
-            newRefreshTokenString
+        val loginResponse = LoginResponse(
+            token = newAccessToken,
+            userId = user.id,
+            email = user.email,
+            role = user.role,
+            isActive = user.isActive
         )
+
+        return Pair(loginResponse, newRefreshTokenString)
     }
 
-    // =========================================================================
-    // GET PROFILE
-    // =========================================================================
-
-    fun getProfile(
-        email: String
-    ): UserProfileResponse {
-
-        val user =
-            userRepository
-                .findByEmail(email)
-                .orElseThrow {
-                    ResourceNotFoundException(
-                        "User not found with email: $email"
-                    )
-                }
+    fun getProfile(email: String): UserProfileResponse {
+        val user = userRepository.findByEmail(email)
+            .orElseThrow { ResourceNotFoundException("User not found with email: $email") }
 
         return UserProfileResponse(
-            userId =
-                user.id,
-            fullName =
-                user.fullName,
-            email =
-                user.email,
-            phoneNumber =
-                user.phoneNumber,
-            city =
-                user.city,
-            role =
-                user.role,
-            clinicLicenseNumber =
-                user.clinicLicenseNumber,
-            bio =
-                user.bio,
-            specialty =
-                user.specialty
+            userId = user.id,
+            fullName = user.fullName,
+            email = user.email,
+            phoneNumber = user.phoneNumber,
+            city = user.city,
+            role = user.role,
+            clinicLicenseNumber = user.clinicLicenseNumber
         )
     }
 
-    // =========================================================================
-    // UPDATE PATIENT / DOCTOR PROFILE
-    // =========================================================================
+    // Edit Info: Patient / Doctor self-service profile update
+    fun updateProfile(email: String, request: UpdateProfileRequest): Pair<UserProfileResponse, String?> {
+        val user = userRepository.findByEmail(email)
+            .orElseThrow { ResourceNotFoundException("User not found with email: $email") }
 
-    fun updateProfile(
-        email: String,
-        request: UpdateProfileRequest
-    ): ProfileUpdateResponse {
-
-        val user =
-            userRepository
-                .findByEmailForUpdate(email)
-                .orElseThrow {
-                    ResourceNotFoundException(
-                        "User not found with email: $email"
-                    )
-                }
-
-        /*
-         * Verify the current password before any
-         * profile/security-sensitive change.
-         */
-        if (
-            !passwordEncoder.matches(
-                request.currentPassword,
-                user.password
-            )
-        ) {
-            throw IllegalArgumentException(
-                "Incorrect current password"
-            )
+        user.fullName = request.fullName.trim()
+        user.city = request.city
+        user.phoneNumber = request.phoneNumber?.trim()
+        if (!passwordEncoder.matches(request.currentPassword, user.password)) {
+            throw IllegalArgumentException("Incorrect current password")
         }
 
-        user.fullName =
-            request.fullName.trim()
+        var newRefreshToken: String? = null
 
-        user.city =
-            request.city
-
-        user.phoneNumber =
-            request.phoneNumber?.trim()
-
-        val passwordChanged =
-            !request.newPassword
-                .isNullOrBlank()
-
-        if (passwordChanged) {
-
-            if (
-                request.newPassword !=
-                request.confirmPassword
-            ) {
+        if (!request.newPassword.isNullOrBlank()) {
+            if (request.newPassword != request.confirmPassword) {
                 throw PasswordMismatchException()
             }
-
-            user.password =
-                passwordEncoder.encode(
-                    request.newPassword
-                )!!
+            user.password = passwordEncoder.encode(request.newPassword)!!
+            
+            // Revoke old sessions (this deletes them from the DB)
+            sessionRevocationService.revokeAllSessions(user)
+            
+            // Generate a NEW refresh token so the user stays logged in
+            newRefreshToken = tokenService.generateRefreshToken(user)
         }
 
-        val newEmail =
-            request.email
-                .trim()
-                .lowercase()
+        val newEmail = request.email.trim().lowercase()
 
-        val emailChanged =
-            newEmail != user.email
-
-        if (
-            emailChanged &&
-            userRepository.existsByEmail(
-                newEmail
-            )
-        ) {
-            throw IllegalArgumentException(
-                "Email is already in use"
-            )
+        if (newEmail != user.email && userRepository.existsByEmail(newEmail)) {
+            throw IllegalArgumentException("Email is already in use")
         }
 
-        user.email =
-            newEmail
+        user.email = newEmail
 
-        /*
-         * Email is currently the JWT subject.
-         * Password changes are also security-sensitive.
-         */
-        val securitySensitiveChange =
-            passwordChanged ||
-                    emailChanged
+        val savedUser = userRepository.save(user)
 
-        if (securitySensitiveChange) {
-
-            sessionRevocationService
-                .revokeAllSessions(
-                    user
-                )
-        }
-
-        val savedUser =
-            userRepository.save(
-                user
-            )
-
-        /*
-         * After revoking every previous session,
-         * create one new session for the current device.
-         */
-        val newRefreshSession =
-            if (securitySensitiveChange) {
-
-                tokenService.createRefreshSession(
-                    savedUser
-                )
-
-            } else {
-                null
-            }
-
-        val newAccessToken =
-            newRefreshSession?.let {
-                tokenService.generateAccessToken(
-                    savedUser,
-                    it
-                )
-            }
-
-        val newRefreshToken =
-            newRefreshSession?.token
-
-        return ProfileUpdateResponse(
-            userId =
-                savedUser.id,
-            fullName =
-                savedUser.fullName,
-            email =
-                savedUser.email,
-            phoneNumber =
-                savedUser.phoneNumber,
-            city =
-                savedUser.city,
-            role =
-                savedUser.role,
-            clinicLicenseNumber =
-                savedUser.clinicLicenseNumber,
-            bio =
-                savedUser.bio,
-            specialty =
-                savedUser.specialty,
-            token =
-                newAccessToken,
-            refreshToken =
-                newRefreshToken,
-            isActive =
-                savedUser.isActive
+        val profileResponse = UserProfileResponse(
+            userId = savedUser.id,
+            fullName = savedUser.fullName,
+            email = savedUser.email,
+            phoneNumber = savedUser.phoneNumber,
+            city = savedUser.city,
+            role = savedUser.role,
+            clinicLicenseNumber = savedUser.clinicLicenseNumber
         )
+        
+        return Pair(profileResponse, newRefreshToken)
     }
 
-    // =========================================================================
-    // LOGOUT
-    // =========================================================================
-
-    fun logout(
-        jti: String,
-        expiresAtEpochSecond: Long,
-        refreshToken: String?
-    ) {
-
-        val expiresAt =
-            java.time.Instant.ofEpochSecond(
-                expiresAtEpochSecond
-            )
-
-        tokenBlacklistService.blacklist(
-            jti,
-            expiresAt
-        )
-
-        if (!refreshToken.isNullOrBlank()) {
-
-            tokenService.deleteByToken(
-                refreshToken
-            )
-        }
+    fun verifyPassword(email: String, passwordToCheck: String): Boolean {
+        val user = userRepository.findByEmail(email)
+            .orElseThrow { ResourceNotFoundException("User not found with email: $email") }
+        return passwordEncoder.matches(passwordToCheck, user.password)
     }
 
-    // =========================================================================
-    // ADMIN PASSWORD CHANGE
-    // =========================================================================
-
-    fun changePassword(
-        email: String,
-        request: ChangePasswordRequest
-    ): PasswordChangeResponse {
-
-        if (
-            request.newPassword !=
-            request.confirmPassword
-        ) {
+    fun logout(jti: String, expiresAtEpochSecond: Long, refreshToken: String?) {
+        val expiresAt = java.time.Instant.ofEpochSecond(expiresAtEpochSecond)
+        tokenBlacklistService.blacklist(jti, expiresAt)
+        
+        if (refreshToken != null) {
+            tokenService.deleteByToken(refreshToken)
+        }
+    }
+    // method for the super admin to change pass if his is active is false
+    fun changePassword(email: String, request: ChangePasswordRequest): MessageResponse {
+        if (request.newPassword != request.confirmPassword) {
             throw PasswordMismatchException()
         }
 
-        val user =
-            userRepository
-                .findByEmailForUpdate(email)
-                .orElseThrow {
-                    ResourceNotFoundException(
-                        "User not found: $email"
-                    )
-                }
+        val user = userRepository.findByEmail(email)
+            .orElseThrow { ResourceNotFoundException("User not found: $email") }
 
-        user.password =
-            passwordEncoder.encode(
-                request.newPassword
-            )!!
+        user.password = passwordEncoder.encode(request.newPassword)!!
+        user.isActive = true // Activate the account after successful password change
+        
+        // SECURITY FIX: Revoke all sessions when password is changed
+        sessionRevocationService.revokeAllSessions(user)
+        
+        userRepository.save(user)
 
-        /*
-         * Required for the initial Admin
-         * first-login password setup.
-         */
-        user.isActive =
-            true
-
-        /*
-         * Revoke all old sessions.
-         */
-        sessionRevocationService
-            .revokeAllSessions(
-                user
-            )
-
-        val savedUser =
-            userRepository.save(
-                user
-            )
-
-        /*
-         * Create the new session for the current device.
-         */
-        val refreshSession =
-            tokenService.createRefreshSession(
-                savedUser
-            )
-
-        val newAccessToken =
-            tokenService.generateAccessToken(
-                savedUser,
-                refreshSession
-            )
-
-        return PasswordChangeResponse(
-            message =
-                "Password changed successfully. All previous sessions were revoked.",
-            token =
-                newAccessToken,
-            userId =
-                savedUser.id,
-            email =
-                savedUser.email,
-            role =
-                savedUser.role,
-            isActive =
-                savedUser.isActive,
-            refreshToken =
-                refreshSession.token
-        )
+        return MessageResponse("Password changed successfully. Account is now active.")
     }
 }
