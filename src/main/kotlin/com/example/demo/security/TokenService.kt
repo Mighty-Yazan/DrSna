@@ -13,6 +13,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoder
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -147,10 +148,12 @@ class TokenService(
         user: User
     ): RefreshToken {
 
+        val rawToken = UUID.randomUUID().toString()
+
         val refreshToken =
             RefreshToken(
-                token =
-                    UUID.randomUUID().toString(),
+                tokenHash = hashRefreshToken(rawToken),
+                rawToken = rawToken,
                 user =
                     user,
                 expiryDate =
@@ -213,7 +216,7 @@ class TokenService(
          */
         val candidate =
             refreshTokenRepository
-                .findByToken(rawToken)
+                .findByTokenHash(hashRefreshToken(rawToken))
                 ?: return null
 
         val userId =
@@ -247,8 +250,8 @@ class TokenService(
 
         val existingToken =
             refreshTokenRepository
-                .findByTokenForUpdate(
-                    rawToken
+                .findByTokenHashForUpdate(
+                    hashRefreshToken(rawToken)
                 )
                 ?: return null
 
@@ -412,10 +415,12 @@ class TokenService(
          *     sessionId = A
          *     tokenVersion = 1
          */
+        val newRawToken = UUID.randomUUID().toString()
+
         val newRefreshToken =
             RefreshToken(
-                token =
-                    UUID.randomUUID().toString(),
+                tokenHash = hashRefreshToken(newRawToken),
+                rawToken = newRawToken,
                 user =
                     user,
                 expiryDate =
@@ -437,7 +442,7 @@ class TokenService(
             )
 
         return Pair(
-            savedToken.token,
+            newRawToken,
             savedToken
         )
     }
@@ -458,8 +463,8 @@ class TokenService(
 
         val existing =
             refreshTokenRepository
-                .findByToken(
-                    token
+                .findByTokenHash(
+                    hashRefreshToken(token)
                 )
 
         if (existing != null) {
@@ -470,6 +475,27 @@ class TokenService(
 
             refreshTokenRepository.flush()
         }
+    }
+
+    // =========================================================================
+    // REFRESH TOKEN HASHING
+    // =========================================================================
+
+    /**
+     * Converts the raw refresh token into a non-reversible SHA-256 hash.
+     *
+     * The raw token is sent only to the browser cookie; the database stores
+     * only this 64-character hexadecimal hash.
+     */
+    private fun hashRefreshToken(rawToken: String): String {
+        val digest =
+            MessageDigest.getInstance("SHA-256")
+
+        return digest
+            .digest(rawToken.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte ->
+                "%02x".format(byte)
+            }
     }
 
     // =========================================================================

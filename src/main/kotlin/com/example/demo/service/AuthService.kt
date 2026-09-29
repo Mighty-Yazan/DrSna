@@ -404,7 +404,7 @@ class AuthService(
 
         return Pair(
             loginResponse,
-            refreshSession.token
+            refreshSession.rawToken ?: throw IllegalStateException("Raw refresh token is missing")
         )
     }
 
@@ -635,7 +635,7 @@ class AuthService(
             }
 
         val newRefreshToken =
-            newRefreshSession?.token
+            newRefreshSession?.rawToken
 
         return ProfileUpdateResponse(
             userId =
@@ -771,7 +771,7 @@ class AuthService(
             isActive =
                 savedUser.isActive,
             refreshToken =
-                refreshSession.token
+                refreshSession.rawToken ?: throw IllegalStateException("Raw refresh token is missing")
         )
     }
 }

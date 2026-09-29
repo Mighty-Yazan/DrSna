@@ -15,79 +15,39 @@ import java.util.UUID
 interface RefreshTokenRepository : JpaRepository<RefreshToken, UUID> {
 
     /*
-     * Normal lookup.
-     *
-     * Used when we only need to find whether a refresh token exists
-     * and which user owns it.
+     * The database stores only tokenHash, never the raw refresh token.
      */
-    fun findByToken(
-        token: String
+    fun findByTokenHash(
+        tokenHash: String
     ): RefreshToken?
 
     /*
      * Locked lookup used during refresh-token rotation.
-     *
-     * PESSIMISTIC_WRITE guarantees that two concurrent requests
-     * cannot successfully rotate the same refresh token.
-     *
-     * Example:
-     *
-     * Request A -> finds Token A and locks it
-     * Request B -> tries to find Token A with the same lock
-     * Request B waits
-     *
-     * Request A -> deletes Token A
-     * Request A -> creates Token B
-     *
-     * Request B -> re-checks Token A
-     * Token A no longer exists
-     * Request B -> returns INVALID
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
-        "select r from RefreshToken r where r.token = :token"
+        "select r from RefreshToken r where r.tokenHash = :tokenHash"
     )
-    fun findByTokenForUpdate(
-        @Param("token") token: String
+    fun findByTokenHashForUpdate(
+        @Param("tokenHash") tokenHash: String
     ): RefreshToken?
 
     /*
      * Finds the currently active refresh session for a browser/device.
-     *
-     * Every login creates its own sessionId.
-     *
-     * Example:
-     *
-     * Laptop -> sessionId A
-     * Phone  -> sessionId B
-     *
-     * Both sessions can exist at the same time.
      */
     fun findBySessionId(
         sessionId: UUID
     ): RefreshToken?
 
     /*
-     * Used when a security-sensitive change happens.
-     *
-     * Example:
-     *
-     * Password changed
-     * Account deactivated
-     * Admin reset
-     * Clinic deactivated
-     * Doctor deactivated
-     *
-     * All refresh sessions belonging to that user are deleted.
+     * Deletes every refresh session belonging to a user.
      */
     fun deleteByUser(
         user: User
     )
 
     /*
-     * Optional cleanup method for expired refresh sessions.
-     *
-     * Can later be used by a scheduled cleanup job.
+     * Deletes expired refresh sessions.
      */
     fun deleteByExpiryDateBefore(
         now: Instant

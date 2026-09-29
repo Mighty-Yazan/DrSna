@@ -15,16 +15,26 @@ class RefreshToken(
     var id: UUID? = null,
 
     /*
-     * The actual refresh token value.
+     * One-way SHA-256 hash of the raw refresh token.
      *
-     * Every refresh request must present the current value.
-     * After rotation, this exact token is deleted and can never be reused.
+     * The raw token is NEVER stored in the database.
      */
     @Column(
+        name = "token_hash",
         nullable = false,
-        unique = true
+        unique = true,
+        length = 64
     )
-    var token: String,
+    var tokenHash: String,
+
+    /*
+     * Temporary in-memory value used only so the caller can send the
+     * newly generated raw token to the browser cookie.
+     *
+     * This field is NOT persisted to the database.
+     */
+    @Transient
+    var rawToken: String? = null,
 
     /*
      * User who owns this refresh session.
@@ -40,9 +50,6 @@ class RefreshToken(
 
     /*
      * Refresh-token expiration date.
-     *
-     * We keep the refresh session for 7 days, while the access token
-     * itself will be only 1 minute.
      */
     @Column(
         nullable = false
@@ -51,15 +58,6 @@ class RefreshToken(
 
     /*
      * Identifies ONE browser/device session.
-     *
-     * Example:
-     *
-     * Laptop  -> sessionId = A
-     * Phone   -> sessionId = B
-     * Tablet  -> sessionId = C
-     *
-     * Therefore logging in on one device does not destroy the
-     * sessions of the other devices.
      */
     @Column(
         name = "session_id",
@@ -70,25 +68,6 @@ class RefreshToken(
 
     /*
      * Version of the refresh session.
-     *
-     * Initial login:
-     *
-     * tokenVersion = 0
-     *
-     * First refresh:
-     *
-     * tokenVersion = 1
-     *
-     * Second refresh:
-     *
-     * tokenVersion = 2
-     *
-     * The access token contains the current version.
-     *
-     * When refresh happens, the old refresh token row is deleted
-     * and the new row receives tokenVersion + 1.
-     *
-     * Therefore the old access token immediately becomes INVALID.
      */
     @Column(
         name = "token_version",
@@ -98,22 +77,7 @@ class RefreshToken(
     var tokenVersion: Long = 0,
 
     /*
-     * Snapshot of User.securityVersion at the time this session
-     * was created.
-     *
-     * Example:
-     *
-     * securityVersion = 0
-     *
-     * User changes password:
-     *
-     * User.securityVersion = 1
-     *
-     * Old refresh sessions still contain:
-     *
-     * securityVersion = 0
-     *
-     * Therefore they are immediately invalid.
+     * Snapshot of User.securityVersion when this session was created.
      */
     @Column(
         name = "security_version",
@@ -123,9 +87,6 @@ class RefreshToken(
     var securityVersion: Long = 0
 ) {
 
-    /*
-     * Returns true when the refresh session has expired.
-     */
     fun isExpired(): Boolean {
         return !Instant.now().isBefore(expiryDate)
     }
